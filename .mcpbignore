@@ -1,0 +1,28 @@
+# What stays out of the .mcpb bundle.
+#
+# A bundle ships the server AND its runtime dependencies, so anything only used
+# to BUILD the server is dead weight a user downloads. Without these rules the
+# bundle carries the TypeScript compiler, which is nearly three quarters of it.
+
+# Build-time only. TypeScript compiles dist/ and is never loaded at runtime.
+node_modules/typescript/
+node_modules/@types/
+
+# Sources and tooling. The bundle runs dist/, not src/.
+src/
+test/
+scripts/
+tsconfig.json
+package-lock.json
+.github/
+
+# Registry metadata: describes the npm package, irrelevant inside a bundle.
+server.json
+
+# Repo furniture.
+.git/
+.gitattributes
+.gitignore
+CHANGELOG.md
+*.log
+*.mcpb

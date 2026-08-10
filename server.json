@@ -1,0 +1,42 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+  "name": "io.github.hcpapi/housecall-pro-mcp",
+  "description": "MCP server for the Housecall Pro API. Connects any MCP-compatible AI agent to a Housecall Pro account for customers, jobs, scheduling, estimates, invoices and the price book. Independent; not affiliated with Housecall Pro.",
+  "version": "1.15.0",
+  "repository": {
+    "url": "https://github.com/hcpapi/housecall-pro-mcp",
+    "source": "github"
+  },
+  "websiteUrl": "https://hcpapi.com/mcp/",
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "housecall-pro-mcp",
+      "version": "1.15.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "HCP_API_KEY",
+          "description": "A Housecall Pro API key. Generated under My Apps, Go to App store, API Key Management. Requires their MAX plan and an admin login.",
+          "isRequired": true,
+          "isSecret": true
+        },
+        {
+          "name": "HCP_READ_ONLY",
+          "description": "Set to 1 to register no tool that can change anything in Housecall Pro.",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "HCP_TOOLSETS",
+          "description": "Comma-separated groups to register: company, customers, jobs, estimates, invoices, pricebook, schedule, reports, admin. Also 'all' and 'default'. Fewer tools in context makes a client choose better among them.",
+          "isRequired": false,
+          "isSecret": false
+        }
+      ]
+    }
+  ]
+}

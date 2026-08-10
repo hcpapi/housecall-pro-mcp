@@ -1,0 +1,59 @@
+{
+  "name": "housecall-pro-mcp",
+  "version": "1.15.0",
+  "description": "MCP server for the Housecall Pro API - connect Claude, ChatGPT, Cursor, or any MCP-compatible AI agent to your Housecall Pro account. Needs a Housecall Pro API key, which is a MAX-plan feature. Independent; not affiliated with Housecall Pro.",
+  "type": "module",
+  "bin": {
+    "housecall-pro-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "llms.txt"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepare": "npm run build",
+    "start": "node dist/index.js",
+    "bundle": "npm run build && mcpb validate manifest.json && mcpb pack ."
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "housecall-pro",
+    "housecallpro",
+    "mcp",
+    "mcp-server",
+    "model-context-protocol",
+    "claude",
+    "claude-desktop",
+    "claude-code",
+    "cursor",
+    "ai-agent",
+    "field-service",
+    "hvac",
+    "plumbing",
+    "hcp",
+    "api"
+  ],
+  "author": "HCP API (https://hcpapi.com)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hcpapi/housecall-pro-mcp.git"
+  },
+  "homepage": "https://github.com/hcpapi/housecall-pro-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/hcpapi/housecall-pro-mcp/issues"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.6.3"
+  }
+}

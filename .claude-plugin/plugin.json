@@ -1,0 +1,57 @@
+{
+  "name": "housecall-pro",
+  "displayName": "Housecall Pro",
+  "version": "1.15.0",
+  "description": "Ask your Housecall Pro account for what you need instead of clicking through reports.",
+  "author": {
+    "name": "HCP API",
+    "email": "hello@hcpapi.com",
+    "url": "https://hcpapi.com"
+  },
+  "homepage": "https://hcpapi.com/mcp/",
+  "repository": "https://github.com/hcpapi/housecall-pro-mcp",
+  "license": "MIT",
+  "keywords": [
+    "housecall-pro",
+    "field-service",
+    "hvac",
+    "plumbing",
+    "crm",
+    "invoicing",
+    "scheduling"
+  ],
+  "userConfig": {
+    "hcp_api_key": {
+      "type": "string",
+      "title": "Housecall Pro API key",
+      "description": "In Housecall Pro: My Apps, then Go to App store, then API Key Management. Needs the MAX plan and an admin login. A read-only key works for reporting and lookups; writing needs a full-access one.",
+      "sensitive": true,
+      "required": true
+    },
+    "hcp_read_only": {
+      "type": "boolean",
+      "title": "Read-only",
+      "description": "Leave every tool that could change something in Housecall Pro out entirely. Independent of the key's own access level: the write tools are absent rather than merely refused.",
+      "required": false,
+      "default": false
+    },
+    "hcp_toolsets": {
+      "type": "string",
+      "title": "Toolsets",
+      "description": "Which groups of tools to load, comma-separated: company, customers, jobs, estimates, invoices, pricebook, schedule, reports, admin. Also 'all', and 'default' for the usual set. Loading fewer makes the assistant choose better among the ones that remain. Leave as 'default' for the usual set.",
+      "required": false,
+      "default": "default"
+    }
+  },
+  "mcpServers": {
+    "housecall-pro": {
+      "command": "npx",
+      "args": ["-y", "housecall-pro-mcp"],
+      "env": {
+        "HCP_API_KEY": "${user_config.hcp_api_key}",
+        "HCP_READ_ONLY": "${user_config.hcp_read_only}",
+        "HCP_TOOLSETS": "${user_config.hcp_toolsets}"
+      }
+    }
+  }
+}

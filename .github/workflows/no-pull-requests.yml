@@ -1,0 +1,36 @@
+name: Pull requests are closed
+
+# This project does not take code contributions. Changes are validated against
+# an internal test suite before release, which a pull request cannot run, so a
+# PR cannot be reviewed here on its merits. Issues are open and read.
+
+on:
+  pull_request_target:
+    types: [opened, reopened]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  close:
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body \
+          "Thanks for taking the time to write this.
+
+          We don't take code contributions on this repository. Releases are
+          validated against an internal test suite that a pull request can't
+          run, so there's no honest way to review one here — closing this is
+          not a judgement on the change itself.
+
+          Bug reports and feature requests are genuinely wanted: please open an
+          issue, and include what you asked your assistant to do and what came
+          back. Anything else, write to hello@hcpapi.com.
+
+          If you've found something broken, saying so in an issue gets it fixed
+          faster than a patch would."
+          gh pr close "$PR" --repo "$GITHUB_REPOSITORY"

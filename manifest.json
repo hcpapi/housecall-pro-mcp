@@ -1,0 +1,69 @@
+{
+  "manifest_version": "0.2",
+  "name": "housecall-pro-mcp",
+  "display_name": "Housecall Pro",
+  "version": "1.15.0",
+  "description": "Ask your Housecall Pro account for what you need instead of clicking through reports.",
+  "long_description": "An open-source MCP server for the Housecall Pro API, covering customers, jobs, scheduling, dispatch, estimates, invoices, the price book, revenue summaries and CSV exports.\n\nIt also knows where Housecall Pro's published documentation is wrong: twelve documented routes that do not exist, and several writes that are accepted and silently ignored. That knowledge is compiled in, so the assistant is told before it gets a wrong answer rather than after.\n\nNeeds a Housecall Pro API key, which is a MAX-plan feature. Independent project, not affiliated with, endorsed by, or sponsored by Housecall Pro.",
+  "author": {
+    "name": "HCP API",
+    "email": "hello@hcpapi.com",
+    "url": "https://hcpapi.com"
+  },
+  "homepage": "https://hcpapi.com/mcp/",
+  "documentation": "https://github.com/hcpapi/housecall-pro-mcp#readme",
+  "support": "https://github.com/hcpapi/housecall-pro-mcp/issues",
+  "license": "MIT",
+  "keywords": [
+    "housecall-pro",
+    "field-service",
+    "hvac",
+    "plumbing",
+    "crm",
+    "invoicing",
+    "scheduling"
+  ],
+  "server": {
+    "type": "node",
+    "entry_point": "dist/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/dist/index.js"],
+      "env": {
+        "HCP_API_KEY": "${user_config.api_key}",
+        "HCP_READ_ONLY": "${user_config.read_only}",
+        "HCP_TOOLSETS": "${user_config.toolsets}"
+      }
+    }
+  },
+  "tools_generated": true,
+  "user_config": {
+    "api_key": {
+      "type": "string",
+      "title": "Housecall Pro API key",
+      "description": "In Housecall Pro: My Apps, then Go to App store, then API Key Management. Needs the MAX plan and an admin login. A read-only key works for reporting and lookups; writing needs a full-access one.",
+      "sensitive": true,
+      "required": true
+    },
+    "read_only": {
+      "type": "boolean",
+      "title": "Read-only",
+      "description": "Leave every tool that could change something in Housecall Pro out entirely. Independent of the key's own access level: the write tools are absent rather than merely refused.",
+      "required": false,
+      "default": false
+    },
+    "toolsets": {
+      "type": "string",
+      "title": "Toolsets",
+      "description": "Which groups of tools to load, comma-separated: company, customers, jobs, estimates, invoices, pricebook, schedule, reports, admin. Also 'all', and 'default' for the usual set. Loading fewer makes the assistant choose better among the ones that remain. Leave blank for the default set.",
+      "required": false,
+      "default": "default"
+    }
+  },
+  "compatibility": {
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": {
+      "node": ">=18.0.0"
+    }
+  }
+}

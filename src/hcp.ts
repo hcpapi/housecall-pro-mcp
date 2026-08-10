@@ -1,0 +1,383 @@
+/**
+ * Minimal Housecall Pro API client. Handles auth, pagination envelopes,
+ * money conversion, and retry policy so the tools don't have to.
+ */
+
+const BASE_URL = "https://api.housecallpro.com";
+
+export class HcpApiError extends Error {
+  constructor(
+    message: string,
+    public status: number,
+    public requestId?: string,
+    /** The raw response body, so callers can tell one 400 from another. */
+    public body?: string,
+  ) {
+    super(message);
+    this.name = "HcpApiError";
+  }
+}
+
+export interface ListPage {
+  items: unknown[];
+  page?: number;
+  page_size?: number;
+  total_pages?: number;
+  total_items?: number;
+  /** True when more pages exist beyond this one; undefined when it can't be told. */
+  has_more?: boolean;
+}
+
+/** Whether more pages follow, from the pagination envelope or a full last page. */
+export function computeHasMore(p: {
+  page?: number;
+  page_size?: number;
+  total_pages?: number;
+  items: unknown[];
+}): boolean | undefined {
+  if (typeof p.page === "number" && typeof p.total_pages === "number") {
+    return p.page < p.total_pages;
+  }
+  if (typeof p.page_size === "number") return p.items.length >= p.page_size;
+  return undefined;
+}
+
+/**
+ * Housecall Pro returns two different 401 bodies that mean different things,
+ * and telling a user the wrong one sends them to fix the wrong problem. A body
+ * naming permissions means the key is real but too narrow - the access level is
+ * chosen when the key is generated and cannot be widened afterwards. A bare
+ * Unauthorized means the key itself was not accepted.
+ */
+function explain401(body: string): string {
+  if (/necessary permissions/i.test(body)) {
+    return (
+      "Your API key is valid but does not have access for this. Key access is chosen when the key is created " +
+      "and cannot be changed later, so this needs a new full-access key from Housecall Pro (My Apps, Go to App store, " +
+      "API Key Management)."
+    );
+  }
+  return "Housecall Pro did not accept this API key. Check that it was copied whole and has not been revoked.";
+}
+
+const LIST_KEYS = [
+  "jobs",
+  "customers",
+  "invoices",
+  "estimates",
+  "employees",
+  "tags",
+  "leads",
+  "appointments",
+  "checklists",
+  "data",
+];
+
+/**
+ * How long to wait before a retry. Housecall Pro publishes no rate limit and no
+ * X-RateLimit-* headers, so a Retry-After on a 429 is the only real backoff
+ * signal it gives — honour it when present (seconds, or an HTTP date), capped so
+ * a hostile value can't stall the client, and fall back to a fixed ramp.
+ */
+export function retryDelayMs(res: Response, attempt: number, baseMs: number): number {
+  const ra = res.headers.get("retry-after");
+  if (ra) {
+    let ms = NaN;
+    const secs = Number(ra);
+    if (ra.trim() !== "" && Number.isFinite(secs)) ms = secs * 1000;
+    else {
+      const when = Date.parse(ra);
+      if (!Number.isNaN(when)) ms = when - Date.now();
+    }
+    if (Number.isFinite(ms) && ms >= 0) return Math.min(ms, 30000);
+  }
+  return baseMs * (attempt + 1);
+}
+
+export class HcpClient {
+  constructor(
+    private apiKey: string,
+    private baseUrl: string = BASE_URL,
+  ) {}
+
+  async request(path: string, params?: Record<string, unknown>): Promise<any> {
+    const url = new URL(this.baseUrl + path);
+    if (params) {
+      for (const [k, v] of Object.entries(params)) {
+        if (v === undefined || v === null || v === "") continue;
+        if (Array.isArray(v)) {
+          for (const item of v) url.searchParams.append(k, String(item));
+        } else {
+          url.searchParams.set(k, String(v));
+        }
+      }
+    }
+    for (let attempt = 0; ; attempt++) {
+      const res = await fetch(url, {
+        headers: {
+          Authorization: `Token ${this.apiKey}`,
+          Accept: "application/json",
+        },
+      });
+      if (res.ok) return res.json();
+      const requestId = res.headers.get("x-request-id") ?? undefined;
+      if ((res.status === 429 || res.status >= 500) && attempt < 2) {
+        await new Promise((r) => setTimeout(r, retryDelayMs(res, attempt, 1000)));
+        continue;
+      }
+      let detail = "";
+      try {
+        detail = (await res.text()).slice(0, 300);
+      } catch {
+        /* body unavailable */
+      }
+      if (res.status === 401) {
+        throw new HcpApiError(
+          `401 Unauthorized. ${explain401(detail)} ${detail}`,
+          401,
+          requestId,
+          detail,
+        );
+      }
+      if (res.status === 404) {
+        throw new HcpApiError(
+          `404 Not Found for ${path}. ${detail}`,
+          404,
+          requestId,
+          detail,
+        );
+      }
+      throw new HcpApiError(`HTTP ${res.status} for ${path}. ${detail}`, res.status, requestId, detail);
+    }
+  }
+
+  /**
+   * GET a route that answers with a document rather than JSON. The invoice
+   * preview returns rendered HTML, so its body is handed back as text.
+   */
+  async requestText(path: string): Promise<{ text: string; contentType: string }> {
+    for (let attempt = 0; ; attempt++) {
+      const res = await fetch(this.baseUrl + path, {
+        headers: { Authorization: `Token ${this.apiKey}` },
+      });
+      if (res.ok) {
+        return {
+          text: await res.text(),
+          contentType: res.headers.get("content-type") ?? "",
+        };
+      }
+      const requestId = res.headers.get("x-request-id") ?? undefined;
+      if ((res.status === 429 || res.status >= 500) && attempt < 2) {
+        await new Promise((r) => setTimeout(r, retryDelayMs(res, attempt, 1000)));
+        continue;
+      }
+      let detail = "";
+      try {
+        detail = (await res.text()).slice(0, 300);
+      } catch {
+        /* body unavailable */
+      }
+      if (res.status === 401) {
+        throw new HcpApiError(
+          `401 Unauthorized. ${explain401(detail)} ${detail}`,
+          401,
+          requestId,
+          detail,
+        );
+      }
+      throw new HcpApiError(`HTTP ${res.status} for ${path}. ${detail}`, res.status, requestId, detail);
+    }
+  }
+
+  /** Writes retry only on 429; a failed write is never blindly repeated. */
+  async patch(path: string, body: unknown): Promise<any> {
+    return this.write("PATCH", path, body);
+  }
+
+  async post(path: string, body: unknown): Promise<any> {
+    return this.write("POST", path, body);
+  }
+
+  /** Several update routes answer on PUT and nothing else. */
+  async put(path: string, body: unknown): Promise<any> {
+    return this.write("PUT", path, body);
+  }
+
+  async del(path: string): Promise<any> {
+    return this.write("DELETE", path, undefined);
+  }
+
+  private async write(method: string, path: string, body: unknown): Promise<any> {
+    for (let attempt = 0; ; attempt++) {
+      const res = await fetch(this.baseUrl + path, {
+        method,
+        headers: {
+          Authorization: `Token ${this.apiKey}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) {
+        // A delete can answer 204 with no body at all.
+        const text = await res.text();
+        if (!text.trim()) return {};
+        try {
+          return JSON.parse(text);
+        } catch {
+          return { raw: text };
+        }
+      }
+      const requestId = res.headers.get("x-request-id") ?? undefined;
+      if (res.status === 429 && attempt < 2) {
+        await new Promise((r) => setTimeout(r, retryDelayMs(res, attempt, 1500)));
+        continue;
+      }
+      let detail = "";
+      try {
+        detail = (await res.text()).slice(0, 400);
+      } catch {
+        /* body unavailable */
+      }
+      if (res.status === 401) {
+        throw new HcpApiError(`401 Unauthorized on write. ${explain401(detail)} ${detail}`, 401, requestId, detail);
+      }
+      throw new HcpApiError(`HTTP ${res.status} for ${method} ${path}. ${detail}`, res.status, requestId, detail);
+    }
+  }
+
+  /**
+   * Upload a file as multipart/form-data.
+   *
+   * The one route on this API that does not take JSON. Content-Type is
+   * deliberately NOT set: fetch derives it from the FormData and appends the
+   * boundary, and a hand-set header loses that boundary and yields a 422 that
+   * reads like a bad body rather than a malformed request.
+   */
+  async postMultipartFile(
+    path: string,
+    file: { filename: string; contentType: string; bytes: Uint8Array },
+  ): Promise<any> {
+    for (let attempt = 0; ; attempt++) {
+      const form = new FormData();
+      form.append(
+        "file",
+        new Blob([file.bytes as unknown as BlobPart], { type: file.contentType }),
+        file.filename,
+      );
+      const res = await fetch(this.baseUrl + path, {
+        method: "POST",
+        headers: { Authorization: `Token ${this.apiKey}`, Accept: "application/json" },
+        body: form,
+      });
+      if (res.ok) {
+        const text = await res.text();
+        if (!text.trim()) return {};
+        try {
+          return JSON.parse(text);
+        } catch {
+          return { raw: text };
+        }
+      }
+      const requestId = res.headers.get("x-request-id") ?? undefined;
+      // An upload is NOT idempotent: a retry that lands after a success the
+      // client never saw leaves two files on the job. Only 429 is retried,
+      // because that one provably did not reach the handler.
+      if (res.status === 429 && attempt < 2) {
+        await new Promise((r) => setTimeout(r, retryDelayMs(res, attempt, 1500)));
+        continue;
+      }
+      let detail = "";
+      try {
+        detail = (await res.text()).slice(0, 400);
+      } catch {
+        /* body unavailable */
+      }
+      if (res.status === 401) {
+        throw new HcpApiError(
+          `401 Unauthorized on upload. ${explain401(detail)} ${detail}`,
+          401,
+          requestId,
+          detail,
+        );
+      }
+      throw new HcpApiError(
+        `HTTP ${res.status} for POST ${path}. ${detail}`,
+        res.status,
+        requestId,
+        detail,
+      );
+    }
+  }
+
+  /** Normalize HCP's list envelopes ({jobs:[...],page,...} etc.) to one shape. */
+  normalizeList(json: any): ListPage {
+    if (Array.isArray(json)) return { items: json };
+    if (json && typeof json === "object") {
+      for (const key of LIST_KEYS) {
+        if (Array.isArray(json[key])) {
+          const lp: ListPage = {
+            items: json[key],
+            page: json.page,
+            page_size: json.page_size,
+            total_pages: json.total_pages ?? json.total_pages_count,
+            total_items: json.total_items ?? json.total_count,
+          };
+          lp.has_more = computeHasMore(lp);
+          return lp;
+        }
+      }
+      // Fall back to the first array present, keeping pagination metadata.
+      const firstArray = Object.values(json).find((v) => Array.isArray(v));
+      if (firstArray) {
+        const lp: ListPage = {
+          items: firstArray as unknown[],
+          page: json.page,
+          page_size: json.page_size,
+          total_pages: json.total_pages ?? json.total_pages_count,
+          total_items: json.total_items ?? json.total_count,
+        };
+        lp.has_more = computeHasMore(lp);
+        return lp;
+      }
+    }
+    return { items: [] };
+  }
+
+  /** Walk pages of a list endpoint. Stops at maxPages or when a page is short/empty. */
+  async *paginate(
+    path: string,
+    params: Record<string, unknown> = {},
+    maxPages = 10,
+    pageSize = 100,
+  ): AsyncGenerator<unknown, void, void> {
+    for (let page = 1; page <= maxPages; page++) {
+      const json = await this.request(path, { ...params, page, page_size: pageSize });
+      const { items, total_pages } = this.normalizeList(json);
+      for (const item of items) yield item;
+      if (items.length === 0) return;
+      if (total_pages !== undefined && page >= total_pages) return;
+      if (items.length < pageSize) return;
+    }
+  }
+}
+
+/** HCP money fields are integer cents. 25000 means $250.00. */
+export function centsToDollars(cents: unknown): number | null {
+  return typeof cents === "number" && Number.isFinite(cents)
+    ? Math.round(cents) / 100
+    : null;
+}
+
+/** Normalize Housecall Pro's work_status values into stable buckets. */
+export function workStatusBucket(
+  status: unknown,
+): "completed" | "canceled" | "in_progress" | "scheduled" | "unscheduled" | "other" {
+  const s = String(status ?? "").toLowerCase();
+  if (s.startsWith("complete")) return "completed";
+  if (s.includes("canceled") || s.includes("cancelled")) return "canceled";
+  if (s.includes("progress")) return "in_progress";
+  if (s.includes("needs scheduling") || s.startsWith("unscheduled")) return "unscheduled";
+  if (s.includes("scheduled")) return "scheduled";
+  return "other";
+}

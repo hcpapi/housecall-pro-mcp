@@ -1,0 +1,92 @@
+# housecall-pro-mcp
+
+> Open-source MCP (Model Context Protocol) server for Housecall Pro. Connects
+> Claude, ChatGPT, Cursor, or any MCP-compatible AI agent to a Housecall Pro
+> account: customers, jobs, job appointments, checklists, invoices and their
+> customer-facing documents, estimates, price book, employees, tags, revenue
+> summaries, CSV exports, and the account's working hours and bookable slots,
+> plus writes (create customers, service addresses, jobs, line items, estimates
+> and leads; book, move and undo appointments; dispatch a crew to a job; change
+> several of a job's line items at once; record an estimate option as approved
+> or declined; tag jobs; maintain the price book) that follow the API key's own
+> access level.
+
+For: Housecall Pro business owners and developers connecting an AI assistant
+to their field-service data.
+
+Independent open-source project by HCP API. Not affiliated with,
+endorsed by, or sponsored by Housecall Pro.
+
+## Key facts
+- Install: `npx housecall-pro-mcp`, no build step, Node 18+
+- Auth: `HCP_API_KEY` environment variable
+- Housecall Pro API access requires their MAX plan, and only an admin user can
+  generate a key (My Apps, Go to App store, API Key Management)
+- A key cannot be edited once created, only copied or deleted
+- Read-only vs full-access is chosen when the key is generated, and this
+  server follows it
+- Money is handled in dollars in both directions
+- No tool sends an email, a text or an estimate on your behalf. Booking a
+  visit, moving one and undoing a booking send the customer nothing themselves;
+  Housecall Pro still sends its own appointment reminders nearer the date, per
+  your account settings. Automations set up inside Housecall Pro run on their
+  own, outside this server's control
+- Booking is one call: creating an appointment on a job also sets that job's
+  schedule, so the work is scheduled and dispatched together. Every appointment
+  needs at least one technician
+- `hcp_dispatch_job` puts a crew on a job's work. That route is customer-visible:
+  Housecall Pro may tell the customer who is coming, and what it sends has not
+  been watched either way, so treat it as reaching them
+- `hcp_approve_estimate_options` and `hcp_decline_estimate_options` record the
+  customer's answer on one or more options, in Housecall Pro's own terms: pro
+  approved and pro declined, the shop writing down an answer rather than a
+  request going out to ask for one. Doing it emailed and texted nobody when it
+  was exercised, which is not a promise for another account - Housecall Pro's
+  automations and notification settings send on their own
+- `hcp_contactability` unions every do-not-contact signal a customer record
+  exposes - notifications switched off, a do-not-contact tag, do-not-contact
+  language in the notes - and names the one it cannot: Housecall Pro's Do Not
+  Service checkbox is a dashboard setting this integration cannot read. A
+  `contactable: true` therefore means no signal was found on the readable
+  surface, not a clearance to contact
+- `hcp_update_job_line_items` changes several of a job's line items in one
+  request, where `hcp_update_job_line_item` is one request per row
+- An arrival window must be a width Housecall Pro accepts: 0, 15, 20, 60, 120,
+  180 or 240 minutes, where 0 means an exact time
+- A booking can be undone, but the API has no route that deletes a job, and a
+  customer service address cannot be changed or removed once added
+- Appointments belong to a job and there is no account-wide appointment list,
+  though the account's own working hours and bookable slots do read account wide
+- Shop defaults (job duration, arrival window, starting line item) are kept in a
+  file the installed server owns, per machine rather than per Housecall Pro
+  account, and nothing in that file is sent to Housecall Pro
+
+- The tool surface is selectable. `--read-only` (or `HCP_READ_ONLY=1`) registers
+  no tool that can change anything, which is independent of the key's own access
+  level: the write tools are absent rather than merely refused. `--toolsets=a,b`
+  (or `HCP_TOOLSETS`) registers only named groups, out of company, customers,
+  jobs, estimates, invoices, pricebook, schedule, reports and admin, plus `all`
+  and `default`. `admin` (registry maintenance writes) is not in the default
+  set; listing tags and job types is, because interpreting job data needs the
+  registries. A misspelled group name stops the server rather than starting it
+  with tools missing
+- Without HCP_API_KEY the server starts keyless: only hcp_render_report and
+  hcp_api_notes register, and nothing can reach a Housecall Pro account. The
+  renderer works on findings from any source, including dashboard CSV exports
+- Every tool carries the MCP spec's annotations, so a client can tell a read
+  from a write, a write from a delete, and either from something that reaches the
+  customer, without inferring it from the name
+- `hcp_api_notes` answers what the Housecall Pro API actually does for a given
+  topic where that differs from its published documentation: 12 documented routes
+  that do not exist, writes that are accepted and silently ignored, and fields
+  whose units are not what they look like. It reads a table compiled into the
+  server and makes no API request. The same tables are exposed as MCP resources
+  at `hcp://api-notes/quirks` and `hcp://api-notes/phantom-routes`
+- Never trust a 2xx on a Housecall Pro write. Several routes answer 200 without
+  changing anything. Tagging a job and untagging one read the job back after
+  writing and report whether the change is actually visible, including reporting
+  it as unknown rather than guessing when the record cannot settle it
+
+## Links
+- Repository: https://github.com/hcpapi/housecall-pro-mcp
+- Contact: hello@hcpapi.com
