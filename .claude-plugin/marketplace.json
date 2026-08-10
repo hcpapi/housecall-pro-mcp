@@ -12,7 +12,7 @@
       "source": "./",
       "displayName": "Housecall Pro",
       "description": "Ask your Housecall Pro account for what you need instead of clicking through reports. Customers, jobs, scheduling, dispatch, estimates, invoices, the price book, revenue summaries, CSV exports, and self-contained HTML reports - with the API's documented-but-absent routes and silent-write quirks compiled in.",
-      "version": "1.15.0",
+      "version": "1.15.1",
       "homepage": "https://hcpapi.com/mcp/",
       "license": "MIT",
       "keywords": [

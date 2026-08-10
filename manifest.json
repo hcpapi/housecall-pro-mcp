@@ -2,7 +2,7 @@
   "manifest_version": "0.2",
   "name": "housecall-pro-mcp",
   "display_name": "Housecall Pro",
-  "version": "1.15.0",
+  "version": "1.15.1",
   "description": "Ask your Housecall Pro account for what you need instead of clicking through reports.",
   "long_description": "An open-source MCP server for the Housecall Pro API, covering customers, jobs, scheduling, dispatch, estimates, invoices, the price book, revenue summaries and CSV exports.\n\nIt also knows where Housecall Pro's published documentation is wrong: twelve documented routes that do not exist, and several writes that are accepted and silently ignored. That knowledge is compiled in, so the assistant is told before it gets a wrong answer rather than after.\n\nNeeds a Housecall Pro API key, which is a MAX-plan feature. Independent project, not affiliated with, endorsed by, or sponsored by Housecall Pro.",
   "author": {

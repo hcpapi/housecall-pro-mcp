@@ -3,6 +3,13 @@
 Release notes live on [GitHub Releases](https://github.com/hcpapi/housecall-pro-mcp/releases);
 this file is the summary per version.
 
+## 1.15.1 — 2026-08-10
+
+- Listed in the [MCP Registry](https://registry.modelcontextprotocol.io) as
+  `io.github.hcpapi/housecall-pro-mcp`. The registry verifies that a package
+  belongs to the server claiming it, so `package.json` now carries the matching
+  `mcpName` marker. No change to how the server behaves.
+
 ## 1.15.0 — Initial public release
 
 An MCP server for the Housecall Pro API. It registers 95 tools across nine
