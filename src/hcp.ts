@@ -43,21 +43,91 @@ export function computeHasMore(p: {
 }
 
 /**
- * Housecall Pro returns two different 401 bodies that mean different things,
- * and telling a user the wrong one sends them to fix the wrong problem. A body
- * naming permissions means the key is real but too narrow - the access level is
- * chosen when the key is generated and cannot be widened afterwards. A bare
- * Unauthorized means the key itself was not accepted.
+ * Routes no Housecall Pro API key reaches, with the path that does work.
+ *
+ * Housecall Pro issues two kinds of key, read-only and full access, and the
+ * choice is fixed when the key is generated. On these routes both kinds are
+ * refused with the same permissions message, so the ordinary advice - go and
+ * make a wider key - costs someone a key and changes nothing. Worse, an agent
+ * reads "your key lacks access" as "this cannot be done" and stops, while the
+ * same information is sitting one call away.
  */
-function explain401(body: string): string {
+const NO_KEY_REACHES: Array<{ method: string; match: RegExp; instead: string }> = [
+  {
+    method: "GET",
+    match: /^\/(?:api\/)?jobs\/[^/]+\/notes\/?$/,
+    instead:
+      "No Housecall Pro API key reads a job's notes on this route - both kinds of key are refused here, so a " +
+      "new key will not open it, and this is not a wall. The notes come back on the job record itself: call " +
+      "hcp_get_job with the same job id and read its notes. What a technician wrote down also tends to show up " +
+      "in the job's line items, or on a nameplate photo in the job's attachments (include_attachments). " +
+      'Topic "job-notes-ride-the-job-record" in hcp_api_notes has it.',
+  },
+];
+
+/**
+ * Where else the same information lives, for routes a key can be refused.
+ * Named beside the refusal so a permission failure hands over the next call
+ * rather than only the bad news.
+ */
+const ELSEWHERE: Array<{ match: RegExp; instead: string }> = [
+  {
+    match: /^\/(?:api\/)?employees/,
+    instead:
+      "Who is on a job does not depend on this route: each row from hcp_list_jobs carries its assigned " +
+      "employees, and hcp_list_jobs takes an employee to narrow a page to one technician.",
+  },
+  {
+    match: /^\/api\/price_book\//,
+    instead:
+      "What the account actually charges also reads out of what it has billed: the line items on " +
+      "hcp_get_invoice carry the names, quantities and prices as sold.",
+  },
+];
+
+function elsewhereFor(path: string): string {
+  return ELSEWHERE.find((e) => e.match.test(path))?.instead ?? "";
+}
+
+/**
+ * What a refused request means, and what to do about it.
+ *
+ * Housecall Pro returns two different refusal bodies that mean different
+ * things, and telling a user the wrong one sends them to fix the wrong
+ * problem. A body naming permissions means the key is too narrow for a route a
+ * wider key reaches - except on the routes above, where no key reaches it at
+ * all. A bare Unauthorized means the key was not accepted here, and when the
+ * same key works elsewhere that is the route not taking an API key at all,
+ * which no key changes.
+ */
+export function explainRefusal(body: string, method: string, path: string): string {
+  const blocked = NO_KEY_REACHES.find((e) => e.method === method && e.match.test(path));
+  if (blocked) return blocked.instead;
+
+  const alternative = elsewhereFor(path);
+  const notes =
+    'Topic "key-access-fixed-at-creation" in hcp_api_notes says which refusals a different key can fix.';
+
   if (/necessary permissions/i.test(body)) {
-    return (
+    return [
       "Your API key is valid but does not have access for this. Key access is chosen when the key is created " +
-      "and cannot be changed later, so this needs a new full-access key from Housecall Pro (My Apps, Go to App store, " +
-      "API Key Management)."
-    );
+        "and cannot be changed later, so this needs a new full-access key from Housecall Pro (My Apps, Go to App store, " +
+        "API Key Management).",
+      alternative,
+      notes,
+    ]
+      .filter(Boolean)
+      .join(" ");
   }
-  return "Housecall Pro did not accept this API key. Check that it was copied whole and has not been revoked.";
+  return [
+    "Housecall Pro did not accept this API key here. Check that it was copied whole and has not been revoked - " +
+      "and if the same key works on other calls, this route does not take an API key at all rather than the key " +
+      "being wrong, which no key changes.",
+    alternative,
+    notes,
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 /** What replaces something that must not reach the model. */
@@ -203,10 +273,13 @@ export class HcpClient {
       } catch {
         /* body unavailable */
       }
-      if (res.status === 401) {
+      // 403 is the same conversation as 401 - the account was reached and the
+      // request was refused - so it gets the same explanation and the same
+      // pointer at what does work.
+      if (res.status === 401 || res.status === 403) {
         throw new HcpApiError(
-          `401 Unauthorized. ${explain401(detail)} ${detail}`,
-          401,
+          `${res.status} ${res.status === 401 ? "Unauthorized" : "Forbidden"}. ${explainRefusal(detail, "GET", path)} ${detail}`,
+          res.status,
           requestId,
           detail,
         );
@@ -249,10 +322,10 @@ export class HcpClient {
       } catch {
         /* body unavailable */
       }
-      if (res.status === 401) {
+      if (res.status === 401 || res.status === 403) {
         throw new HcpApiError(
-          `401 Unauthorized. ${explain401(detail)} ${detail}`,
-          401,
+          `${res.status} ${res.status === 401 ? "Unauthorized" : "Forbidden"}. ${explainRefusal(detail, "GET", path)} ${detail}`,
+          res.status,
           requestId,
           detail,
         );
@@ -311,8 +384,13 @@ export class HcpClient {
       } catch {
         /* body unavailable */
       }
-      if (res.status === 401) {
-        throw new HcpApiError(`401 Unauthorized on write. ${explain401(detail)} ${detail}`, 401, requestId, detail);
+      if (res.status === 401 || res.status === 403) {
+        throw new HcpApiError(
+          `${res.status} ${res.status === 401 ? "Unauthorized" : "Forbidden"} on write. ${explainRefusal(detail, method, path)} ${detail}`,
+          res.status,
+          requestId,
+          detail,
+        );
       }
       throw new HcpApiError(`HTTP ${res.status} for ${method} ${path}. ${detail}`, res.status, requestId, detail);
     }
@@ -365,10 +443,10 @@ export class HcpClient {
       } catch {
         /* body unavailable */
       }
-      if (res.status === 401) {
+      if (res.status === 401 || res.status === 403) {
         throw new HcpApiError(
-          `401 Unauthorized on upload. ${explain401(detail)} ${detail}`,
-          401,
+          `${res.status} ${res.status === 401 ? "Unauthorized" : "Forbidden"} on upload. ${explainRefusal(detail, "POST", path)} ${detail}`,
+          res.status,
           requestId,
           detail,
         );

@@ -32,6 +32,7 @@ import {
   shouldRegister,
   type SurfaceOptions,
 } from "./toolsets.js";
+import { unknownParameterRefusal } from "./params.js";
 
 /** Serialize a result for the model, with an optional note about data quirks. */
 function out(result: unknown, note?: string) {
@@ -69,6 +70,87 @@ const DOCUMENT_PREVIEW_CHARS = 4000;
 
 const MONEY_NOTE =
   "All *_dollars fields were converted from Housecall Pro's raw integer cents.";
+
+/**
+ * What to do when a read carries no equipment identity.
+ *
+ * Housecall Pro's equipment and property-profile records are not on the public
+ * API, so an agent looking for the unit on a job or a customer finds nothing
+ * and keeps hunting for a route that will never exist. Three paths do reach a
+ * unit, and naming them here is the difference between "not possible" and the
+ * next call. Said only on the two reads an agent actually looks at, and only
+ * when the record really carries nothing.
+ */
+const EQUIPMENT_ON_A_JOB =
+  "No equipment record comes back with a job - Housecall Pro does not expose one, and no query phrasing finds it. " +
+  "Three paths do reach the unit: a nameplate photo on the job's attachments (read the job with include_attachments " +
+  "and hand the download URL straight to hcp_equipment_age_from_photo, which takes a url); a serial or model written " +
+  'into the line items; or asking the technician on site. Topic "equipment-not-on-public-api" in hcp_api_notes has it.';
+
+const EQUIPMENT_ON_A_CUSTOMER =
+  "No equipment record comes back with a customer - Housecall Pro does not expose one. Reach the unit through this " +
+  "customer's jobs instead: a nameplate photo on a job's attachments (hcp_get_job with include_attachments) goes " +
+  "straight to hcp_equipment_age_from_photo, a serial is often written into the line items, or the customer can be " +
+  'asked. Topic "equipment-not-on-public-api" in hcp_api_notes has it.';
+
+/**
+ * Does this record name a unit at all? A serial or a model somewhere in the
+ * payload means the pointer above would be noise, so it is not said. Depth is
+ * capped because this runs on every job and customer read.
+ */
+export function carriesEquipmentIdentity(record: unknown, depth = 0): boolean {
+  if (depth > 4 || !record || typeof record !== "object") return false;
+  if (Array.isArray(record)) {
+    return record.some((v) => carriesEquipmentIdentity(v, depth + 1));
+  }
+  for (const [key, value] of Object.entries(record as Record<string, unknown>)) {
+    if (/^(serial|equipment|model)/i.test(key)) {
+      if (typeof value === "string" && value.trim() !== "") return true;
+      if (typeof value === "number") return true;
+      if (Array.isArray(value) && value.length > 0) return true;
+      if (value && typeof value === "object" && Object.keys(value).length > 0) return true;
+    }
+    if (value && typeof value === "object" && carriesEquipmentIdentity(value, depth + 1)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * What an empty filtered read means - which is two things, and the difference
+ * matters. A filter can match nothing because nothing matches it, or because
+ * the filter never applied: an unrecognised name is dropped rather than
+ * refused upstream, and a value outside the vocabulary an endpoint accepts
+ * matches nothing at all. Reported as an absence, either one reads as "there
+ * is none", and one of them is wrong.
+ */
+export function emptyFilterNote(filters: Record<string, unknown>): string | undefined {
+  const applied = Object.entries(filters).filter(([, v]) => {
+    if (v === undefined || v === null || v === "") return false;
+    return !(Array.isArray(v) && v.length === 0);
+  });
+  if (applied.length === 0) return undefined;
+
+  const names = applied.map(([k]) => k).sort();
+  const inProgress = applied.some(
+    ([, v]) =>
+      (Array.isArray(v) ? v : [v]).some(
+        (x) => typeof x === "string" && /in\s*progress/i.test(x),
+      ),
+  );
+
+  return (
+    `Nothing matched ${names.join(", ")}. That is either the filter matching nothing or the filter not being ` +
+    `the one you meant: an unrecognised filter name is dropped rather than refused upstream, and a value outside ` +
+    `the vocabulary this endpoint accepts matches nothing at all. Drop a filter or widen the window before ` +
+    `reporting an empty answer as an absence.` +
+    (inProgress
+      ? ` The "in progress" status in particular is rarely kept up to date on a real account, so it comes back ` +
+        `empty on a busy day - topic "active-job-detection" in hcp_api_notes has how to find who is working now.`
+      : "")
+  );
+}
 
 const TOTAL_NOTES = API_NOTES.length;
 const TOTAL_PHANTOM = PHANTOM_ROUTES.length;
@@ -596,6 +678,54 @@ function jobCarriesTag(job: any, tagId: string, tagName?: string): boolean | "un
 /* ---------- tool registration ---------- */
 
 /**
+ * Build the registration helper every tool in this package goes through.
+ *
+ * Registration is centralised rather than each tool calling `server.tool`
+ * itself, so that surface gating, annotations and the undeclared-parameter
+ * refusal are applied once and inherited by anything added later. A tool
+ * absent from TOOL_SPECS still registers - the hygiene check is what catches
+ * it - but it registers without annotations rather than being mislabelled as
+ * a read.
+ *
+ * The parameter refusal has two halves, because one is not enough. The
+ * handler is wrapped so an undeclared argument is refused before a request is
+ * built; and the registered schema is widened to let that argument reach the
+ * wrapper at all, since the SDK otherwise parses it away silently - the tool
+ * runs with the filter missing and the caller is told nothing. A schema that
+ * advertises no extra properties does not prevent this: the invented filter
+ * that prompted the guard was sent against a schema that already said so.
+ */
+export function makeToolRegistrar(server: McpServer, opts: SurfaceOptions) {
+  return <Args extends ZodRawShapeCompat>(
+    name: string,
+    description: string,
+    schema: Args,
+    handler: ToolCallback<Args>,
+  ) => {
+    if (!shouldRegister(name, opts)) return;
+    const declared = Object.keys(schema);
+    const guarded = ((args: any, extra: any) => {
+      const refusal = unknownParameterRefusal(name, args, declared);
+      if (refusal) return errOut(refusal);
+      return (handler as any)(args, extra);
+    }) as ToolCallback<Args>;
+
+    const spec = TOOL_SPECS[name];
+    const registered = spec
+      ? server.tool(name, description, schema, annotationsFor(name, spec), guarded)
+      : server.tool(name, description, schema, guarded);
+
+    // Keep undeclared arguments alive as far as the wrapper above. Without
+    // this the SDK hands the handler a cleaned-up object and the refusal has
+    // nothing to refuse. An embedder passing a stand-in server gets nothing
+    // back here, and needs nothing: it calls the wrapped handler directly.
+    if (registered && typeof registered === "object" && "inputSchema" in registered) {
+      registered.inputSchema = z.object(schema as unknown as z.ZodRawShape).passthrough();
+    }
+  };
+}
+
+/**
  * Register the tool surface.
  *
  * `opts` decides which tools exist at all: a read-only install never registers
@@ -608,26 +738,7 @@ export function registerTools(
   hcp: HcpClient,
   opts: SurfaceOptions = { readOnly: false, toolsets: [...TOOLSETS] },
 ) {
-  /**
-   * Registration goes through here rather than straight to `server.tool` so
-   * that gating and annotations are applied uniformly. A tool absent from
-   * TOOL_SPECS still registers - the hygiene check is what catches it - but it
-   * registers without annotations rather than being mislabelled as a read.
-   */
-  const tool = <Args extends ZodRawShapeCompat>(
-    name: string,
-    description: string,
-    schema: Args,
-    handler: ToolCallback<Args>,
-  ) => {
-    if (!shouldRegister(name, opts)) return;
-    const spec = TOOL_SPECS[name];
-    if (spec) {
-      server.tool(name, description, schema, annotationsFor(name, spec), handler);
-    } else {
-      server.tool(name, description, schema, handler);
-    }
-  };
+  const tool = makeToolRegistrar(server, opts);
 
   tool(
     "hcp_get_company",
@@ -789,13 +900,14 @@ export function registerTools(
       try {
         const params = include_attachments ? { "expand[]": "attachments" } : undefined;
         const json = await hcp.request(`/customers/${customer_id}`, params);
-        if (!include_attachments) return out(json);
+        const equipment = carriesEquipmentIdentity(json) ? "" : ` ${EQUIPMENT_ON_A_CUSTOMER}`;
+        if (!include_attachments) return out(json, equipment.trim() || undefined);
         const attachments = Array.isArray((json as any)?.attachments)
           ? (json as any).attachments.map(trimAttachment)
           : [];
         return out(
           { ...(json as any), attachments },
-          `${attachments.length} attachment(s). ${ATTACHMENT_NOTE}`,
+          `${attachments.length} attachment(s). ${ATTACHMENT_NOTE}${equipment}`,
         );
       } catch (e) {
         return errOut(e);
@@ -957,6 +1069,19 @@ export function registerTools(
             `the ${allRows.length} row(s) this page returned: ${rows.length} matched. total_items and total_pages ` +
             `count the rows before that match, and a job on another page was never looked at.`
           : "";
+        // A filtered read that matched nothing is two different answers, and
+        // an agent that cannot tell them apart reports the wrong one.
+        const empty = rows.length
+          ? ""
+          : ` ${
+              emptyFilterNote({
+                work_status,
+                scheduled_start_min,
+                scheduled_start_max,
+                customer_id,
+                employee,
+              }) ?? ""
+            }`.trimEnd();
         return out(
           {
             total_items,
@@ -973,8 +1098,8 @@ export function registerTools(
             jobs: rows,
           },
           include_attachments
-            ? `${MONEY_NOTE} ${statusNote} ${countAttachments(filtering ? rows : (items as any[]))} attachment(s) on this page. ${ATTACHMENT_NOTE}${employeeNote}`
-            : `${MONEY_NOTE} ${statusNote}${employeeNote}`,
+            ? `${MONEY_NOTE} ${statusNote} ${countAttachments(filtering ? rows : (items as any[]))} attachment(s) on this page. ${ATTACHMENT_NOTE}${employeeNote}${empty}`
+            : `${MONEY_NOTE} ${statusNote}${employeeNote}${empty}`,
         );
       } catch (e) {
         return errOut(e);
@@ -997,13 +1122,14 @@ export function registerTools(
       try {
         const params = include_attachments ? { "expand[]": "attachments" } : undefined;
         const json = await hcp.request(`/jobs/${job_id}`, params);
-        if (!include_attachments) return out(json, MONEY_NOTE);
+        const equipment = carriesEquipmentIdentity(json) ? "" : ` ${EQUIPMENT_ON_A_JOB}`;
+        if (!include_attachments) return out(json, `${MONEY_NOTE}${equipment}`);
         const attachments = Array.isArray((json as any)?.attachments)
           ? (json as any).attachments.map(trimAttachment)
           : [];
         return out(
           { ...(json as any), attachments },
-          `${MONEY_NOTE} ${attachments.length} attachment(s). ${ATTACHMENT_NOTE}`,
+          `${MONEY_NOTE} ${attachments.length} attachment(s). ${ATTACHMENT_NOTE}${equipment}`,
         );
       } catch (e) {
         return errOut(e);
@@ -1210,6 +1336,16 @@ export function registerTools(
         }
 
         const truncated = !serverSide && !stoppedEarly && walked === (max_pages ?? 10);
+        const empty = rows.length
+          ? ""
+          : ` ${
+              emptyFilterNote({
+                since,
+                until,
+                statuses,
+                min_due_dollars,
+              }) ?? ""
+            }`.trimEnd();
         return out(
           {
             count: rows.length,
@@ -1230,12 +1366,12 @@ export function registerTools(
             invoices: rows,
           },
           serverSide
-            ? `${MONEY_NOTE} Housecall Pro applied this ${field}-date window itself.`
+            ? `${MONEY_NOTE} Housecall Pro applied this ${field}-date window itself.${empty}`
             : `${MONEY_NOTE} A service-date window is the one date Housecall Pro cannot filter on, so this server walked pages and filtered them. ` +
               (truncated
                 ? `The page cap was reached, so older invoices in the window may be missing - raise max_pages, or use date_field "created" to let the API do it. `
                 : "") +
-              `If you meant the date the invoice was raised, settled, or is owed, pass date_field "created", "paid" or "due" and the API filters it directly.`,
+              `If you meant the date the invoice was raised, settled, or is owed, pass date_field "created", "paid" or "due" and the API filters it directly.${empty}`,
         );
       } catch (e) {
         return errOut(e);
@@ -2603,7 +2739,9 @@ export function registerTools(
 
   tool(
     "hcp_get_job_notes",
-    "Read the notes on a job.",
+    "Read the notes on a job through their own route. Prefer hcp_get_job: the job record already carries its " +
+      "notes, and this route is refused to every kind of Housecall Pro API key, so it answers a permission " +
+      "failure rather than the notes - which is not the same as the notes being unreachable.",
     { job_id: z.string().describe("Job id (job_...)") },
     async ({ job_id }) => {
       try {
