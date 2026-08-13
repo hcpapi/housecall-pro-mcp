@@ -60,6 +60,68 @@ function explain401(body: string): string {
   return "Housecall Pro did not accept this API key. Check that it was copied whole and has not been revoked.";
 }
 
+/** What replaces something that must not reach the model. */
+export const REDACTED = "[redacted]";
+
+/**
+ * An unbroken run of 32 or more hexadecimal characters: the shape of a key.
+ *
+ * The guards on either side are what keep it off Housecall Pro's own
+ * identifiers. Those are prefixed - job_, cus_, est_, nte_, atc_, pro_,
+ * pbmcat_ and the rest - and an underscore is a word character, so a run that
+ * begins after one never starts at a boundary and is left whole. A dashed
+ * identifier is excluded the same way, so nothing of the shape of a UUID is
+ * touched either.
+ */
+const KEY_SHAPED = /(?<![\w-])[0-9a-fA-F]{32,}(?![\w-])/g;
+
+/** A URL inside a body, up to the first character no URL would carry. */
+const URL_SHAPED = /\bhttps?:\/\/[^\s"'<>)\]}\\]+/gi;
+
+/**
+ * Take out of an upstream body the two things that must not survive into a
+ * transcript.
+ *
+ * The first is the caller's own credential. Housecall Pro echoes the API key it
+ * was given back inside its 401 body - measured, not supposed - and an upstream
+ * body is appended to the error a tool returns. Without this pass the
+ * customer's key lands in the model's context, in the session transcript, and
+ * in every log downstream of both.
+ *
+ * The second is the detail of a link. A file link is a working handle on a
+ * customer's premises, and not all of them expire, so one copied into an error
+ * message keeps working wherever that message ends up. The host is what tells
+ * an agent which fetch failed; the path and the query are the part worth not
+ * repeating.
+ *
+ * Three passes, in order:
+ *
+ * 1. The configured key values, matched literally. Exact, and always safe.
+ * 2. Any URL carrying more than a host, cut back to its host.
+ * 3. Anything else key-shaped, per KEY_SHAPED above.
+ *
+ * This runs on upstream text only - never on our own wording, and never on a
+ * successful payload, where a link is the thing that was asked for and has to
+ * be passed onward.
+ */
+export function redactSecrets(text: string, secrets: Array<string | undefined> = []): string {
+  let clean = text;
+  for (const secret of secrets) {
+    if (typeof secret !== "string") continue;
+    const value = secret.trim();
+    // A short value is not a credential, and blanking every occurrence of one
+    // would eat ordinary words out of the message.
+    if (value.length < 8) continue;
+    clean = clean.split(value).join(REDACTED);
+  }
+  clean = clean.replace(URL_SHAPED, (found) => {
+    const parts = /^(https?:\/\/[^/?#]+)([/?#].*)?$/i.exec(found);
+    if (!parts || !parts[2] || parts[2] === "/") return found;
+    return `${parts[1]}/${REDACTED}`;
+  });
+  return clean.replace(KEY_SHAPED, REDACTED);
+}
+
 const LIST_KEYS = [
   "jobs",
   "customers",
@@ -100,6 +162,16 @@ export class HcpClient {
     private baseUrl: string = BASE_URL,
   ) {}
 
+  /**
+   * An upstream body, made safe to hand to the model. Redaction runs BEFORE
+   * the length cap: capping first would cut a key in half and leave the front
+   * of it in the message, which is still the customer's credential in a
+   * transcript.
+   */
+  private safeDetail(body: string, max: number): string {
+    return redactSecrets(body, [this.apiKey]).slice(0, max);
+  }
+
   async request(path: string, params?: Record<string, unknown>): Promise<any> {
     const url = new URL(this.baseUrl + path);
     if (params) {
@@ -127,7 +199,7 @@ export class HcpClient {
       }
       let detail = "";
       try {
-        detail = (await res.text()).slice(0, 300);
+        detail = this.safeDetail(await res.text(), 300);
       } catch {
         /* body unavailable */
       }
@@ -173,7 +245,7 @@ export class HcpClient {
       }
       let detail = "";
       try {
-        detail = (await res.text()).slice(0, 300);
+        detail = this.safeDetail(await res.text(), 300);
       } catch {
         /* body unavailable */
       }
@@ -235,7 +307,7 @@ export class HcpClient {
       }
       let detail = "";
       try {
-        detail = (await res.text()).slice(0, 400);
+        detail = this.safeDetail(await res.text(), 400);
       } catch {
         /* body unavailable */
       }
@@ -289,7 +361,7 @@ export class HcpClient {
       }
       let detail = "";
       try {
-        detail = (await res.text()).slice(0, 400);
+        detail = this.safeDetail(await res.text(), 400);
       } catch {
         /* body unavailable */
       }

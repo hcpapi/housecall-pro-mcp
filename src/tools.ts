@@ -464,8 +464,20 @@ function trimAttachment(a: any) {
   };
 }
 
+/**
+ * The link is the handle a tool needs, and nothing more than that.
+ *
+ * A download_url reaches a photo of someone's home or plant room without any
+ * further credential, and the ones hanging off an equipment or customer record
+ * carry no expiry at all - so a link repeated into a reply, a note or a message
+ * is a working way in, left somewhere nobody is guarding. Job and estimate
+ * links are minted per response and die within the hour, which is a different
+ * problem with the same instruction: use it in the turn you read it.
+ */
 const ATTACHMENT_NOTE =
-  "Each download_url is signed and minted for this response. The same attachment asked for again comes back with a different link, so fetch it now rather than storing it.";
+  "A download_url is the handle on the file: hand it straight to the tool that needs it, in the same turn, " +
+  "and do not repeat it in a reply, a note or a message. Some of these are minted for this response and expire " +
+  "within the hour; others carry no expiry at all, so a copy of one keeps working wherever it is left.";
 
 /** Count attachments across a list response, for the note. */
 function countAttachments(rows: any[]): number {
@@ -3372,8 +3384,12 @@ export function registerTools(
           ? (job as any).attachments.map(trimAttachment)
           : [];
         const present = listed.some((a: any) => a?.id === (created as any)?.id);
+        // The created record without its link. The same file's link is in
+        // job_attachments below, and a link returned twice is a second copy of
+        // a working handle on the file for anything that reads this response.
+        const { download_url: _uploadedLink, ...uploaded } = trimAttachment(created);
         return out(
-          { uploaded: created, verified: present, job_attachments: listed },
+          { uploaded, verified: present, job_attachments: listed },
           present
             ? `Confirmed against the job's attachment list. ${ATTACHMENT_NOTE}`
             : "The upload was accepted but the file is not in the job's attachment list yet. Housecall Pro commits an upload a moment after accepting it, so re-read the job before concluding it failed - and do not retry blindly, which would attach it twice.",
