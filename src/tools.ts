@@ -118,8 +118,14 @@ function trimJob(j: any) {
     canceled_at: j?.canceled_at ?? undefined,
     scheduled_start: j?.schedule?.scheduled_start ?? j?.scheduled_start,
     scheduled_end: j?.schedule?.scheduled_end ?? j?.scheduled_end,
-    // When the work actually finished - the clock a repeat-visit window runs
-    // from, which scheduled_start only approximates.
+    // The three work clocks. on_my_way_at and started_at are how a job that is
+    // being worked right now shows itself: many accounts never move a job into
+    // the "in progress" status, so these timestamps are the evidence that
+    // filter cannot give. completed_at is when the work actually finished - the
+    // clock a repeat-visit window runs from, which scheduled_start only
+    // approximates.
+    on_my_way_at: j?.work_timestamps?.on_my_way_at ?? undefined,
+    started_at: j?.work_timestamps?.started_at ?? undefined,
     completed_at: j?.work_timestamps?.completed_at ?? undefined,
     job_type: j?.job_fields?.job_type?.name ?? undefined,
     // Same address_id means the same property even when a customer has
@@ -148,6 +154,24 @@ function trimJob(j: any) {
         })
       : undefined,
   };
+}
+
+/**
+ * Does a trimmed job row belong to this technician? Housecall Pro offers no
+ * employee filter on /jobs, so this runs over the rows a query already
+ * returned - never over the whole account. An id matches exactly; anything
+ * else is a case-insensitive substring of the assigned employee's name, so
+ * "smith" finds "Pat Smith" without needing the id first.
+ */
+function jobHasEmployee(row: any, needle: string): boolean {
+  const q = needle.trim().toLowerCase();
+  if (!q) return true;
+  const employees = Array.isArray(row?.employees) ? row.employees : [];
+  return employees.some((e: any) => {
+    const id = String(e?.id ?? "").toLowerCase();
+    const name = String(e?.name ?? "").toLowerCase();
+    return (id !== "" && id === q) || (name !== "" && name.includes(q));
+  });
 }
 
 function trimInvoice(inv: any) {
@@ -842,15 +866,43 @@ export function registerTools(
 
   tool(
     "hcp_list_jobs",
-    "List jobs, optionally filtered by work status, scheduled date range, or customer. Rows carrying a deleted_at value are deleted jobs - exclude them from counts and revenue.",
+    "List jobs, optionally filtered by work status, scheduled date range, customer, or assigned technician. " +
+      "Each row carries an employees field - the technicians assigned to that job, with id and name - so who is " +
+      "on a job is read off the row rather than assumed. Rows also carry on_my_way_at and started_at, which are " +
+      "how a job being worked right now shows itself. Rows carrying a deleted_at value are deleted jobs - " +
+      "exclude them from counts and revenue.",
     {
       work_status: z
         .array(z.enum(["scheduled", "in progress", "completed", "canceled", "needs scheduling"]))
         .optional()
         .describe("Filter by one or more statuses (server-side)"),
-      scheduled_start_min: z.string().optional().describe("ISO date/datetime lower bound for the scheduled start"),
-      scheduled_start_max: z.string().optional().describe("ISO date/datetime upper bound for the scheduled start"),
+      scheduled_start_min: z
+        .string()
+        .optional()
+        .describe(
+          "ISO date/datetime lower bound for the scheduled start. Pass your own local offset, e.g. " +
+            "2026-08-13T00:00:00-04:00, not a bare UTC day: a UTC window against a business running in a local " +
+            "timezone shifts the day, so an evening job falls outside \"today\" and a late job from the day " +
+            "before falls inside it.",
+        ),
+      scheduled_start_max: z
+        .string()
+        .optional()
+        .describe(
+          "ISO date/datetime upper bound for the scheduled start. Use the same local offset as " +
+            "scheduled_start_min, e.g. 2026-08-14T00:00:00-04:00 for the end of a local day.",
+        ),
       customer_id: z.string().optional().describe("Only jobs for this customer id"),
+      employee: z
+        .string()
+        .optional()
+        .describe(
+          "Keep only jobs assigned to this technician - an employee id (from hcp_list_employees), or part of a " +
+            "name, matched case-insensitively against each row's employees. Housecall Pro has no employee filter " +
+            "on this endpoint, so this narrows the rows the OTHER filters returned, page by page: pair it with a " +
+            "tight scheduled window (and raise page_size) or a technician's job can sit on a page you never " +
+            "fetched. The reported totals count the rows before this filter.",
+        ),
       include_attachments: z
         .boolean()
         .optional()
@@ -860,7 +912,7 @@ export function registerTools(
       page: z.number().int().min(1).optional(),
       page_size: z.number().int().min(1).max(100).optional(),
     },
-    async ({ work_status, scheduled_start_min, scheduled_start_max, customer_id, include_attachments, page, page_size }) => {
+    async ({ work_status, scheduled_start_min, scheduled_start_max, customer_id, employee, include_attachments, page, page_size }) => {
       try {
         const json = await hcp.request("/jobs", {
           "work_status[]": work_status,
@@ -872,7 +924,7 @@ export function registerTools(
           page_size: page_size ?? 25,
         });
         const { items, total_items, total_pages } = hcp.normalizeList(json);
-        const rows = items.map((j: any) =>
+        const allRows = items.map((j: any) =>
           include_attachments
             ? {
                 ...trimJob(j),
@@ -882,18 +934,35 @@ export function registerTools(
               }
             : trimJob(j),
         );
+        // The employee narrowing happens here because the API offers none.
+        // Both counts are reported so the caller can see what was dropped
+        // rather than reading the result as the whole account's answer.
+        const filtering = typeof employee === "string" && employee.trim() !== "";
+        const rows = filtering ? allRows.filter((r) => jobHasEmployee(r, employee)) : allRows;
         const statusNote = `The work_status field in responses uses HCP's human vocabulary ("complete unrated", "user canceled", ...) - the work_status_bucket field normalizes it.`;
+        const employeeNote = filtering
+          ? ` Housecall Pro has no employee filter, so "${employee}" was matched here against the employees on ` +
+            `the ${allRows.length} row(s) this page returned: ${rows.length} matched. total_items and total_pages ` +
+            `count the rows before that match, and a job on another page was never looked at.`
+          : "";
         return out(
           {
             total_items,
             total_pages,
             has_more: typeof total_pages === "number" ? (page ?? 1) < total_pages : undefined,
             page: page ?? 1,
+            ...(filtering
+              ? {
+                  employee_filter: employee,
+                  rows_on_page: allRows.length,
+                  matched_on_page: rows.length,
+                }
+              : {}),
             jobs: rows,
           },
           include_attachments
-            ? `${MONEY_NOTE} ${statusNote} ${countAttachments(items as any[])} attachment(s) on this page. ${ATTACHMENT_NOTE}`
-            : `${MONEY_NOTE} ${statusNote}`,
+            ? `${MONEY_NOTE} ${statusNote} ${countAttachments(filtering ? rows : (items as any[]))} attachment(s) on this page. ${ATTACHMENT_NOTE}${employeeNote}`
+            : `${MONEY_NOTE} ${statusNote}${employeeNote}`,
         );
       } catch (e) {
         return errOut(e);
