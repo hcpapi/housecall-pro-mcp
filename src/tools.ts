@@ -675,6 +675,56 @@ function jobCarriesTag(job: any, tagId: string, tagName?: string): boolean | "un
   return recognised ? false : "unknown";
 }
 
+/**
+ * Whether a re-read record shows the scalar values a write sent. Only the fields
+ * the write actually carried are weighed - a field it never sent says nothing
+ * about whether the write landed. Arrays and nested objects are skipped: they do
+ * not compare cleanly and a mismatch there would be a false negative. Numbers are
+ * matched as rounded integers so cents and quantities line up; booleans and
+ * strings by value. Returns false the moment a sent scalar disagrees, true when
+ * at least one sent scalar agrees and none disagree, and "unknown" when nothing
+ * could be compared - so a shape this code cannot read never reports a real write
+ * as failed.
+ */
+export function writeLanded(record: unknown, sent: Record<string, unknown>): boolean | "unknown" {
+  if (!record || typeof record !== "object") return "unknown";
+  let comparable = 0;
+  for (const [key, value] of Object.entries(sent)) {
+    if (value === undefined || value === null) continue;
+    if (Array.isArray(value) || typeof value === "object") continue;
+    const got = (record as Record<string, unknown>)[key];
+    if (got === undefined) continue;
+    comparable++;
+    const mismatch =
+      typeof value === "number" && typeof got === "number"
+        ? Math.round(value) !== Math.round(got)
+        : typeof value === "boolean"
+          ? Boolean(got) !== value
+          : String(got) !== String(value);
+    if (mismatch) return false;
+  }
+  return comparable > 0 ? true : "unknown";
+}
+
+/**
+ * Whether a re-read record carries every id a crew write sent. Ids can ride as
+ * bare strings or as objects that name one, so both shapes are read. A value that
+ * is not a list of ids at all is "unknown" rather than a false negative, and an
+ * empty target list is true (nothing was asked for). Used to confirm a dispatch
+ * or an appointment's crew by reading the record back instead of echoing the
+ * input as the result.
+ */
+export function recordHasIds(got: unknown, want: string[]): boolean | "unknown" {
+  if (!Array.isArray(got)) return "unknown";
+  const ids = new Set(
+    got
+      .map((x) => (typeof x === "string" ? x : (x as any)?.id))
+      .filter((x): x is string => typeof x === "string" && x.length > 0),
+  );
+  if (got.length > 0 && ids.size === 0) return "unknown";
+  return want.every((id) => ids.has(id));
+}
+
 /* ---------- tool registration ---------- */
 
 /**
@@ -867,18 +917,31 @@ export function registerTools(
           page_size: page_size ?? 25,
         });
         const { items, total_items, total_pages } = hcp.normalizeList(json);
-        return out({
-          total_items,
-          total_pages,
-          has_more: typeof total_pages === "number" ? (page ?? 1) < total_pages : undefined,
-          page: page ?? 1,
-          customers: (items as any[]).map((c) => {
-            // Every address, not just the first: a match may have been made on
-            // the second one, and a caller disambiguating needs to see it.
-            const addresses = Array.isArray(c?.addresses) ? c.addresses.map(trimAddress) : [];
-            return { ...trimCustomer(c), ...(addresses.length ? { addresses } : {}) };
-          }),
+        const customers = (items as any[]).map((c) => {
+          // Every address, not just the first: a match may have been made on
+          // the second one, and a caller disambiguating needs to see it.
+          const addresses = Array.isArray(c?.addresses) ? c.addresses.map(trimAddress) : [];
+          return { ...trimCustomer(c), ...(addresses.length ? { addresses } : {}) };
         });
+        // An empty search is two different answers - nothing matched, or the
+        // filter never applied - and on tag_ids a non-empty answer has its own
+        // trap: a tag id dropped upstream returns the whole book, not a slice.
+        const note =
+          customers.length === 0
+            ? emptyFilterNote({ query, tag_ids })
+            : tag_ids?.length
+              ? "Filtered by tag_ids. If this reads like the whole customer book rather than a slice, the tag filter may have been dropped upstream - an unrecognised tag_ids value is ignored, not refused - so verify the tag id against hcp_list_tags."
+              : undefined;
+        return out(
+          {
+            total_items,
+            total_pages,
+            has_more: typeof total_pages === "number" ? (page ?? 1) < total_pages : undefined,
+            page: page ?? 1,
+            customers,
+          },
+          note,
+        );
       } catch (e) {
         return errOut(e);
       }
@@ -1462,7 +1525,13 @@ export function registerTools(
     async () => {
       try {
         const json = await hcp.request("/employees", { page_size: 100 });
-        return out(hcp.normalizeList(json).items);
+        const items = hcp.normalizeList(json).items;
+        return out(
+          items,
+          items.length === 0
+            ? "No employees are configured on this account. That is a normal answer, not a failure or a permission wall."
+            : undefined,
+        );
       } catch (e) {
         return errOut(e);
       }
@@ -1476,7 +1545,13 @@ export function registerTools(
     async () => {
       try {
         const json = await hcp.request("/tags", { page_size: 100 });
-        return out(hcp.normalizeList(json).items);
+        const items = hcp.normalizeList(json).items;
+        return out(
+          items,
+          items.length === 0
+            ? "No tags on this account yet, which is normal, not a failure. Add one with hcp_create_tag."
+            : undefined,
+        );
       } catch (e) {
         return errOut(e);
       }
@@ -1832,6 +1907,7 @@ export function registerTools(
         return out(
           { option_ids: ids, ...(res as any) },
           "Housecall Pro recorded these options as pro approved - its own wording for the shop's record of the answer. " +
+            "A 2xx is not proof the state moved: confirm each option's approval_status reads \"pro approved\" via hcp_list_estimates before reporting it recorded (topic \"estimate-answer-confirm-by-status\" in hcp_api_notes). " +
             "Nothing was emailed or texted to the customer when this was exercised, which is not a promise for your account: Housecall Pro's own automations and notification settings can send on their own. " +
             "copied_on_approval_to_job_id carries the job id when the account copies an approved option to a job, and is null when it does not.",
         );
@@ -1862,6 +1938,7 @@ export function registerTools(
         return out(
           { option_ids: ids, ...(res as any) },
           "Housecall Pro recorded these options as pro declined - its own wording for the shop's record of the answer. " +
+            "A 2xx is not proof the state moved: confirm each option's approval_status reads \"pro declined\" via hcp_list_estimates before reporting it recorded (topic \"estimate-answer-confirm-by-status\" in hcp_api_notes). " +
             "Nothing was emailed or texted to the customer when this was exercised, which is not a promise for your account: Housecall Pro's own automations and notification settings can send on their own.",
         );
       } catch (e) {
@@ -1873,7 +1950,8 @@ export function registerTools(
   tool(
     "hcp_update_customer",
     "Update fields on an existing customer. Fields you omit are left untouched. " +
-      WRITE_KEY_NOTE,
+      WRITE_KEY_NOTE +
+      "There is no notes field here. To leave a note about the work, put it on the job with hcp_add_job_note (it rides the job record and reads back on it); a customer-level note is a Housecall Pro dashboard field this surface does not write, though it does read back inline on hcp_get_customer.",
     {
       customer_id: z.string(),
       first_name: z.string().optional(),
@@ -1889,7 +1967,16 @@ export function registerTools(
     async ({ customer_id, ...fields }) => {
       try {
         const res = await hcp.patch(`/customers/${customer_id}`, fields);
-        return out(res, "Customer updated (merge semantics - omitted fields untouched).");
+        // The customer is read back rather than trusting the 2xx: this PATCH is
+        // in the silent-success family, so the answer reports whether the change
+        // is actually on the record instead of that a request was taken.
+        const verified = await verifyWrite(
+          res,
+          () => hcp.request(`/customers/${customer_id}`),
+          (customer) => writeLanded(customer, fields),
+          "the customer",
+        );
+        return out(verified, "Merge semantics - omitted fields untouched.");
       } catch (e) {
         return errOut(e);
       }
@@ -1928,7 +2015,10 @@ export function registerTools(
         for (const li of line_items) {
           added.push(await hcp.post(`/jobs/${job_id}/line_items`, buildLineItem(li)));
         }
-        return out(added, "Line items added (dollars converted to cents). The job's total_amount and derived description update from these.");
+        return out(
+          added,
+          "Line items added (dollars converted to cents) - each created row is echoed above. The job's total_amount and derived description follow from these; a 2xx is not proof they moved (topic \"patch-jobs-silent-200\" in hcp_api_notes), so confirm the rows and the new total with hcp_get_job_line_items.",
+        );
       } catch (e) {
         return errOut(e);
       }
@@ -1988,10 +2078,29 @@ export function registerTools(
           dispatched_employees_ids: employee_ids,
           arrival_window_minutes: arrival_window_minutes ?? 0,
         });
-        return out(
+        // The job's appointments are read back rather than trusting the 2xx: the
+        // answer says a visit at these times is now on the job, not that a
+        // request was taken.
+        const bookedId = (res as any)?.id;
+        const verified = await verifyWrite(
           res,
-          "Appointment booked, and the job's schedule follows it - the job now reads as booked for these times. " +
-            "Nothing was sent to the customer now; Housecall Pro may still send its own reminder nearer the date. Confirm with hcp_list_job_appointments.",
+          () => hcp.request(`/jobs/${job_id}/appointments`),
+          (list) => {
+            const items = hcp.normalizeList(list).items as any[];
+            if (!Array.isArray(items)) return "unknown";
+            return items.some(
+              (a) =>
+                (bookedId && a?.id === bookedId) ||
+                (String(a?.start_time) === String(start_time) &&
+                  String(a?.end_time) === String(end_time)),
+            );
+          },
+          "the job's appointments",
+        );
+        return out(
+          verified,
+          "The job's schedule follows the visit - booked, it reads as booked for these times. " +
+            "Nothing was sent to the customer now; Housecall Pro may still send its own reminder nearer the date.",
         );
       } catch (e) {
         return errOut(e);
@@ -2092,16 +2201,36 @@ export function registerTools(
         }
 
         const window = arrival_window_minutes ?? current?.arrival_window_minutes;
+        const effStart = start_time ?? current?.start_time;
+        const effEnd = end_time ?? current?.end_time;
         const res = await put(`/jobs/${job_id}/appointments/${appointment_id}`, {
-          start_time: start_time ?? current?.start_time,
-          end_time: end_time ?? current?.end_time,
+          start_time: effStart,
+          end_time: effEnd,
           dispatched_employees_ids: employees,
           ...(typeof window === "number" ? { arrival_window_minutes: window } : {}),
         });
-        return out(
+        // The appointment is read back rather than trusting the 2xx: the answer
+        // says the visit now carries these times and crew, not that a request
+        // was taken. readAppointment reads the subroute, where the change shows.
+        const verified = await verifyWrite(
           res,
-          "Appointment updated, and the job's schedule follows it - the job now reads as booked for the visit's times. " +
-            "Nothing was sent to the customer now; Housecall Pro may still send its own reminder nearer the date. Confirm with hcp_list_job_appointments.",
+          () => readAppointment(job_id, appointment_id),
+          (appt) => {
+            if (!appt || typeof appt !== "object") return "unknown";
+            const a = appt as any;
+            const timesOk =
+              String(a.start_time) === String(effStart) &&
+              String(a.end_time) === String(effEnd);
+            const crew = recordHasIds(a.dispatched_employees_ids, employees as string[]);
+            if (crew === "unknown") return timesOk ? true : false;
+            return timesOk && crew;
+          },
+          "the appointment",
+        );
+        return out(
+          verified,
+          "The job's schedule follows the visit - moved, the job reads as booked for the visit's times. " +
+            "Nothing was sent to the customer now; Housecall Pro may still send its own reminder nearer the date.",
         );
       } catch (e) {
         if (isArchivedJob(e)) return archivedSkip({ job_id, appointment_id, updated: false });
@@ -2125,9 +2254,21 @@ export function registerTools(
     async ({ job_id, appointment_id }) => {
       try {
         const res = await hcp.del(`/jobs/${job_id}/appointments/${appointment_id}`);
-        return out(
+        // A removal answers an empty success whether or not the visit was there,
+        // so the job's appointments are read back and the answer says whether
+        // the id is actually gone rather than that a request was taken.
+        const verified = await verifyWrite(
           res,
-          "Visit removed from the job. The job itself is still there. Nothing was sent to the customer now; Housecall Pro may still send its own reminder nearer any date left on the job. Confirm with hcp_list_job_appointments.",
+          async () => hcp.normalizeList(await hcp.request(`/jobs/${job_id}/appointments`)).items,
+          (items) => {
+            if (!Array.isArray(items)) return "unknown";
+            return !items.some((a: any) => a?.id === appointment_id);
+          },
+          "the job's appointments",
+        );
+        return out(
+          verified,
+          "The job itself is still there. Nothing was sent to the customer now; Housecall Pro may still send its own reminder nearer any date left on the job.",
         );
       } catch (e) {
         if (isArchivedJob(e)) return archivedSkip({ job_id, appointment_id, deleted: false });
@@ -2169,16 +2310,41 @@ export function registerTools(
           deleted.push(id);
         }
         const res = await hcp.del(`/jobs/${job_id}/schedule`);
+        // The DELETEs answering success is not the same as the job being
+        // unscheduled - this is the silent-success family. The job's real state
+        // is read back so the answer reports its actual work_status and whatever
+        // visits remain, rather than stating the outcome from the delete.
+        let workStatus: unknown = "unknown";
+        let remaining: unknown = "unknown";
+        let cleared: boolean | "unknown" = "unknown";
+        try {
+          const job = await hcp.request(`/jobs/${job_id}`);
+          workStatus = (job as any)?.work_status ?? "unknown";
+          const appts = hcp.normalizeList(
+            await hcp.request(`/jobs/${job_id}/appointments`),
+          ).items as any[];
+          remaining = appts.map((a) => a?.id).filter((id) => typeof id === "string");
+          cleared = appts.length === 0;
+        } catch {
+          // The read-back itself failed; report the clear as accepted, not
+          // confirmed, rather than claiming a state that was never read.
+        }
         return out(
           {
             job_id,
             deleted_appointment_ids: deleted,
-            schedule_cleared: true,
-            work_status: "needs scheduling",
+            schedule_cleared: cleared,
+            work_status: workStatus,
+            remaining_appointments: remaining,
             job_deleted: false,
             schedule_response: res,
           },
-          "The job is back to needs scheduling and its visits are gone. The job record remains - its customer, line items and notes are untouched, and nothing here deletes a job. " +
+          (cleared === true
+            ? "Confirmed by reading the job back: no visits remain and its work_status is above. "
+            : cleared === false
+              ? "Housecall Pro answered success but the job still shows visits on read-back - treat it as NOT unscheduled and check it in Housecall Pro. "
+              : "The clear was accepted but reading the job back to confirm it failed - check the job in Housecall Pro. ") +
+            "The job record remains - its customer, line items and notes are untouched, and nothing here deletes a job. " +
             "Nothing was sent to the customer now; Housecall Pro sends its own reminders on the account's settings, and there is no longer a date for one.",
         );
       } catch (e) {
@@ -2230,9 +2396,18 @@ export function registerTools(
         const res = await put(`/jobs/${job_id}/dispatch`, {
           dispatched_employees: employee_ids.map((id) => ({ employee_id: id })),
         });
+        // The job is read back rather than echoing the requested ids as the
+        // result: the answer confirms the crew Housecall Pro actually recorded,
+        // so a silently-ignored dispatch does not read as a successful one.
+        const verified = await verifyWrite(
+          res,
+          () => hcp.request(`/jobs/${job_id}`),
+          (job) => recordHasIds((job as any)?.assigned_employees, employee_ids),
+          "the job",
+        );
         return out(
-          { job_id, dispatched_employee_ids: employee_ids, ...(res as any) },
-          "Crew dispatched to the job. Nothing was sent to the customer by the call itself, though your account's own automations can still send on their own. Confirm the crew with hcp_get_job.",
+          { job_id, requested_employee_ids: employee_ids, ...verified },
+          "Nothing was sent to the customer by the call itself, though your account's own automations can still send on their own.",
         );
       } catch (e) {
         return errOut(e);
@@ -2495,7 +2670,10 @@ export function registerTools(
       }
       try {
         const res = await put(`/api/price_book/materials/${material_uuid}`, body);
-        return out(res, "Material updated (dollars converted to cents). Only the fields you named were sent.");
+        return out(
+          res,
+          "Material sent (dollars converted to cents); only the fields you named were sent. A 2xx is not proof the change landed (topic \"patch-jobs-silent-200\" in hcp_api_notes) - confirm the new values with hcp_search_pricebook kind='materials' before reporting the update as done.",
+        );
       } catch (e) {
         return errOut(e);
       }
@@ -2589,7 +2767,7 @@ export function registerTools(
     },
     async ({ job_id, line_item_id, name, description, kind, quantity, unit_price_dollars, unit_cost_dollars }) => {
       try {
-        const res = await put(`/jobs/${job_id}/line_items/${line_item_id}`, {
+        const sent = {
           name,
           ...(description !== undefined ? { description } : {}),
           ...(kind !== undefined ? { kind } : {}),
@@ -2598,10 +2776,24 @@ export function registerTools(
             ? { unit_price: Math.round(unit_price_dollars * 100) }
             : {}),
           ...(unit_cost_dollars !== undefined ? { unit_cost: Math.round(unit_cost_dollars * 100) } : {}),
-        });
-        return out(
+        };
+        const res = await put(`/jobs/${job_id}/line_items/${line_item_id}`, sent);
+        // The line item is read back rather than trusting the 2xx: the answer
+        // reports the change only when it is visible on the row.
+        const verified = await verifyWrite(
           res,
-          "Line item updated (dollars converted to cents). The job's total and derived description follow from its line items.",
+          async () => hcp.normalizeList(await hcp.request(`/jobs/${job_id}/line_items`)).items,
+          (items) => {
+            if (!Array.isArray(items)) return "unknown";
+            const item = (items as any[]).find((li) => li?.id === line_item_id);
+            if (!item) return "unknown";
+            return writeLanded(item, sent);
+          },
+          "the job's line items",
+        );
+        return out(
+          verified,
+          "The job's total and derived description follow from its line items.",
         );
       } catch (e) {
         return errOut(e);
@@ -2668,12 +2860,31 @@ export function registerTools(
       try {
         // Housecall Pro takes this route on PUT, and only at the bulk_update
         // path: the bare line_items path answers with an HTML 404 page.
+        const built = line_items.map(buildBulkLineItem);
         const res = await put(`/jobs/${job_id}/line_items/bulk_update`, {
-          line_items: line_items.map(buildBulkLineItem),
+          line_items: built,
         });
-        return out(
+        // The list is read back once and every changed row is confirmed against
+        // it, the way the estimate-option bulk update does: a 2xx on this route
+        // is not evidence the rows moved.
+        const verified = await verifyWrite(
           res,
-          `${line_items.length} line item(s) updated in one call (dollars converted to cents). The job's total and derived description follow from its line items.`,
+          async () => hcp.normalizeList(await hcp.request(`/jobs/${job_id}/line_items`)).items,
+          (items) => {
+            if (!Array.isArray(items)) return "unknown";
+            const rows = items as any[];
+            const results = built.map((sent) => {
+              const item = rows.find((li) => li?.id === sent.id);
+              return item ? writeLanded(item, sent) : "unknown";
+            });
+            if (results.includes(false)) return false;
+            return results.every((r) => r === true) ? true : "unknown";
+          },
+          "the job's line items",
+        );
+        return out(
+          verified,
+          `${line_items.length} line item(s) sent in one call (dollars converted to cents). The job's total and derived description follow from its line items.`,
         );
       } catch (e) {
         return errOut(e);
@@ -2694,7 +2905,19 @@ export function registerTools(
     async ({ job_id, line_item_id }) => {
       try {
         const res = await hcp.del(`/jobs/${job_id}/line_items/${line_item_id}`);
-        return out(res, "Line item removed. The job's total follows from the items left on it.");
+        // A removal on this API answers an empty success whether or not the row
+        // was there, so the list is read back and the answer says whether the
+        // row is actually gone.
+        const verified = await verifyWrite(
+          res,
+          async () => hcp.normalizeList(await hcp.request(`/jobs/${job_id}/line_items`)).items,
+          (items) => {
+            if (!Array.isArray(items)) return "unknown";
+            return !(items as any[]).some((li) => li?.id === line_item_id);
+          },
+          "the job's line items",
+        );
+        return out(verified, "The job's total follows from the items left on it.");
       } catch (e) {
         return errOut(e);
       }
@@ -2729,7 +2952,9 @@ export function registerTools(
               order_index: li?.order_index,
             })),
           },
-          MONEY_NOTE,
+          (items as any[]).length === 0
+            ? "No line items came back. An empty result here is usually a mismatched id rather than an option with no items: the estimate's own csr_ id is not an option id, so pass the est_ option id from hcp_list_estimates or the estimate write response. As a read to confirm an estimate write, an empty answer reads as a failed write when the id is the real problem."
+            : MONEY_NOTE,
         );
       } catch (e) {
         return errOut(e);
@@ -2928,11 +3153,26 @@ export function registerTools(
               String(r.description ?? "").toLowerCase().includes(q),
           );
         }
+        const baseNote = expandFlatRate
+          ? `${MONEY_NOTE} margin_percent is computed only where a service carries both a price and a cost; a missing cost yields no margin rather than a flattering one.`
+          : MONEY_NOTE;
+        // An empty result is two answers - nothing matched, or a filter that
+        // never applied - and on materials it has a third: a root or plain pull
+        // reads empty because materials sit in the child categories.
+        const emptyNote =
+          rows.length === 0
+            ? [
+                emptyFilterNote({ query, category_uuid }),
+                kind === "materials" || kind === "material_categories"
+                  ? "Materials nest under child categories, so an empty pull against a root or a plain list reads as an empty book - walk the tree first with whole_tree=true, then pull materials per category at every depth (topic \"material-categories-nest-and-list-roots-only\" in hcp_api_notes)."
+                  : undefined,
+              ]
+                .filter(Boolean)
+                .join(" ")
+            : "";
         return out(
           { kind, total_items: total_items ?? (json as any)?.total_count, count: rows.length, items: rows },
-          expandFlatRate
-            ? `${MONEY_NOTE} margin_percent is computed only where a service carries both a price and a cost; a missing cost yields no margin rather than a flattering one.`
-            : MONEY_NOTE,
+          emptyNote ? `${baseNote} ${emptyNote}` : baseNote,
         );
       } catch (e) {
         return errOut(e);
@@ -2947,7 +3187,13 @@ export function registerTools(
     async () => {
       try {
         const json = await hcp.request("/job_fields/job_types", { page_size: 100 });
-        return out(hcp.normalizeList(json).items);
+        const items = hcp.normalizeList(json).items;
+        return out(
+          items,
+          items.length === 0
+            ? "No job types are configured on this account, which is an ordinary state and not an error."
+            : undefined,
+        );
       } catch (e) {
         return errOut(e);
       }
@@ -3081,7 +3327,12 @@ export function registerTools(
     "hcp_list_routes",
     "List routes for a date - employees grouped with the appointments, events and estimates assigned to them.",
     {
-      date: z.string().optional().describe("ISO date, e.g. 2026-08-07. Omit for the default window"),
+      date: z
+        .string()
+        .optional()
+        .describe(
+          "ISO date, e.g. 2026-08-07. Omit for the default window. Bound the day in the account's own local offset, not a bare UTC date: a UTC day against a business in a local timezone shifts the day and can name the wrong day's routes - topic \"active-job-detection\" in hcp_api_notes.",
+        ),
       page: z.number().int().min(1).optional(),
       page_size: z.number().int().min(1).max(100).optional(),
     },
@@ -3133,7 +3384,12 @@ export function registerTools(
       try {
         const json = await hcp.request(`/jobs/${encodeURIComponent(job_id)}/invoices`);
         const items = hcp.normalizeList(json).items.map(trimInvoice);
-        return out({ count: items.length, invoices: items }, MONEY_NOTE);
+        return out(
+          { count: items.length, invoices: items },
+          items.length === 0
+            ? "No invoice belongs to this job. That is not a bad job id: an invoice exists only once the job has been invoiced in Housecall Pro, so a worked-but-not-invoiced job has none, and there is no route to create one (topic \"job-has-no-invoice-yet\" in hcp_api_notes). hcp_list_invoices finds invoices across the account another way."
+            : MONEY_NOTE,
+        );
       } catch (e) {
         return errOut(e);
       }
@@ -3184,7 +3440,12 @@ export function registerTools(
           quantity: m?.quantity,
           unit_cost_dollars: centsToDollars(m?.unit_cost),
         }));
-        return out({ count: items.length, job_input_materials: items }, MONEY_NOTE);
+        return out(
+          { count: items.length, job_input_materials: items },
+          items.length === 0
+            ? "No materials are recorded against this job. That is a normal result, not an error - it means none were entered in Housecall Pro, which is common; the priced line items (hcp_get_job_line_items) are separate from what was recorded as used on site."
+            : MONEY_NOTE,
+        );
       } catch (e) {
         return errOut(e);
       }
@@ -3268,9 +3529,10 @@ export function registerTools(
         );
         return out(
           res,
-          notify
-            ? "notify was true, so Housecall Pro was asked to tell the customer."
-            : "notify was false. Housecall Pro may still send its own reminder as the date approaches.",
+          (notify
+            ? "notify was true, so Housecall Pro was asked to tell the customer. "
+            : "notify was false. Housecall Pro may still send its own reminder as the date approaches. ") +
+            "A 2xx here is not proof the visit was booked: re-read the estimate's work_status with hcp_list_estimates and confirm it moved to scheduled before reporting the visit as booked (topic \"estimate-schedule-confirm-by-status\" in hcp_api_notes).",
         );
       } catch (e) {
         return errOut(e);
@@ -3346,7 +3608,7 @@ export function registerTools(
         if (ending_at) body.ending_at = ending_at;
         return out(
           await hcp.post("/jobs/lock", body),
-          "This locked every job in the window, not a chosen few, and nothing here can unlock them.",
+          "This targets every job in the window, not a chosen few, and nothing here can unlock them. The API answers 200 even when the window matched no jobs, so spot-check a job in the range with hcp_get_job (read locked_at) before reporting the batch as locked.",
         );
       } catch (e) {
         return errOut(e);
@@ -3365,7 +3627,10 @@ export function registerTools(
     },
     async ({ job_id, title, url }) => {
       try {
-        return out(await hcp.post(`/jobs/${encodeURIComponent(job_id)}/links`, { title, url }));
+        return out(
+          await hcp.post(`/jobs/${encodeURIComponent(job_id)}/links`, { title, url }),
+          "Accepted, not confirmed: job links have no list route to read back through, so the 2xx is the only signal and the returned id is the only handle on it - keep it. An \"Application not found\" answer is the account lacking an API application (a configuration limit), not a permission wall.",
+        );
       } catch (e) {
         return errOut(e);
       }
@@ -3388,6 +3653,7 @@ export function registerTools(
             `/estimates/${encodeURIComponent(estimate_id)}/options/${encodeURIComponent(option_id)}/links`,
             { title, url },
           ),
+          "Accepted, not confirmed: estimate option links have no list route to read back through, so treat the 2xx as accepted rather than confirmed and keep the returned id. An \"Application not found\" answer is the account lacking an API application, not a permission wall.",
         );
       } catch (e) {
         return errOut(e);
@@ -3442,7 +3708,10 @@ export function registerTools(
       try {
         const body: Record<string, unknown> = { url };
         if (events?.length) body.events = events;
-        return out(await hcp.post("/webhooks/subscription", body));
+        return out(
+          await hcp.post("/webhooks/subscription", body),
+          "Accepted, not confirmed: there is no route to list webhook subscriptions afterwards (GET /webhooks is absent), so the returned subscription body is the only confirmation available and a delivery cannot be verified through this API. Keep the id.",
+        );
       } catch (e) {
         return errOut(e);
       }
@@ -3658,6 +3927,7 @@ export function registerTools(
             `/api/price_book/material_categories/${encodeURIComponent(category_id)}`,
             { name },
           ),
+          "Rename sent. A 2xx is not proof the rename took (topic \"patch-jobs-silent-200\" in hcp_api_notes) - confirm the new name with hcp_search_pricebook kind='material_categories' before reporting it done.",
         );
       } catch (e) {
         return errOut(e);
@@ -3677,7 +3947,10 @@ export function registerTools(
     },
     async (args) => {
       try {
-        return out(await hcp.post("/api/price_book/price_forms", args));
+        return out(
+          await hcp.post("/api/price_book/price_forms", args),
+          "Price form created - its id is on the response. Confirm it with hcp_list_price_forms.",
+        );
       } catch (e) {
         return errOut(e);
       }
@@ -3702,6 +3975,7 @@ export function registerTools(
             `/api/price_book/price_forms/${encodeURIComponent(price_form_id)}`,
             rest,
           ),
+          "Update sent. A success answer is not evidence the fields changed - confirm them with hcp_list_price_forms (pass price_form_id to read one back) before reporting the update as done.",
         );
       } catch (e) {
         return errOut(e);
@@ -3896,7 +4170,12 @@ export function registerTools(
         }
         const json = await hcp.request("/api/price_book/price_forms", { page_size: 100 });
         const { items, total_items } = hcp.normalizeList(json);
-        return out({ total_items, count: items.length, price_forms: items });
+        return out(
+          { total_items, count: items.length, price_forms: items },
+          items.length === 0
+            ? "No price forms are set up on this account. Online booking is optional, so an empty list is a normal answer rather than a failure."
+            : undefined,
+        );
       } catch (e) {
         return errOut(e);
       }
@@ -3975,17 +4254,7 @@ export function registerTools(
           invoices: trimInvoice,
           estimates: trimEstimate,
         };
-        const rows: Record<string, unknown>[] = [];
-        const dateWindowed = entity === "invoices" && (since || until);
-        // A date window needs a wider walk: rows outside it are skipped, not collected.
-        const maxPages = dateWindowed ? 50 : Math.ceil(cap / 100);
-        for await (const item of hcp.paginate(`/${entity}`, {}, maxPages)) {
-          if (dateWindowed) {
-            const d = String((item as any)?.service_date ?? "").slice(0, 10);
-            // Invoices arrive newest-first, so once rows predate the window we are done.
-            if (since && d && d < since) break;
-            if (!inWindow((item as any)?.service_date, since, until)) continue;
-          }
+        const prepRow = (item: unknown) => {
           const trimmed = trimmers[entity](item);
           if (entity === "invoices" || entity === "estimates") {
             // flatten arrays for CSV
@@ -3994,15 +4263,68 @@ export function registerTools(
             }
           }
           if (Array.isArray(trimmed.tags)) trimmed.tags = (trimmed.tags as unknown[]).join("; ");
-          rows.push(trimmed);
-          if (rows.length >= cap) break;
+          return trimmed;
+        };
+        const rows: Record<string, unknown>[] = [];
+        const dateWindowed = entity === "invoices" && (since || until);
+        let mayBeIncomplete = false;
+
+        if (dateWindowed) {
+          // Walk pages explicitly so the reason the walk stopped is known.
+          // Reaching the window's oldest invoice, the row cap, or the end of the
+          // data is a complete window; stopping on the page cap while still
+          // inside the window is not - and a bare row count would read a
+          // truncated export as the whole window. This is the may_be_incomplete
+          // flag hcp_list_invoices and hcp_revenue_summary already carry.
+          const maxPages = 50;
+          let stop = "pagecap";
+          outer: for (let page = 1; page <= maxPages; page++) {
+            const { items } = hcp.normalizeList(
+              await hcp.request(`/${entity}`, { page, page_size: 100 }),
+            );
+            if ((items as any[]).length === 0) {
+              stop = "exhausted";
+              break;
+            }
+            for (const item of items as any[]) {
+              const d = String(item?.service_date ?? "").slice(0, 10);
+              // Invoices arrive newest-first, so once rows predate the window we are done.
+              if (since && d && d < since) {
+                stop = "windowfloor";
+                break outer;
+              }
+              if (!inWindow(item?.service_date, since, until)) continue;
+              rows.push(prepRow(item));
+              if (rows.length >= cap) {
+                stop = "rowcap";
+                break outer;
+              }
+            }
+            if ((items as any[]).length < 100) {
+              stop = "exhausted";
+              break;
+            }
+          }
+          mayBeIncomplete = stop === "pagecap";
+        } else {
+          const maxPages = Math.ceil(cap / 100);
+          for await (const item of hcp.paginate(`/${entity}`, {}, maxPages)) {
+            rows.push(prepRow(item));
+            if (rows.length >= cap) break;
+          }
         }
+
         const csv = toCsv(rows);
         return {
           content: [
             {
               type: "text" as const,
-              text: `${rows.length} rows (cap ${cap}). ${MONEY_NOTE}\n\n${csv}`,
+              text:
+                `${rows.length} rows (cap ${cap})` +
+                (mayBeIncomplete
+                  ? ", may_be_incomplete=true: the export stopped on its page cap before reaching the window's oldest invoice, so the window may extend past the rows walked - narrow since/until, or read the rest with hcp_list_invoices"
+                  : "") +
+                `. ${MONEY_NOTE}\n\n${csv}`,
             },
           ],
         };

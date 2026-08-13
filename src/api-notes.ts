@@ -309,6 +309,65 @@ export const API_NOTES: ApiNote[] = [
       "Only the permissions message is worth a new key, and it names no scope to request, so a full-access key generated fresh is the only lever. Anything else is out of reach however privileged the key - treat it as a limit of the public API, not a key problem.",
     kind: "shape",
   },
+  {
+    id: "estimate-answer-confirm-by-status",
+    tags: [
+      "estimate",
+      "option",
+      "approve",
+      "decline",
+      "approval_status",
+      "answer",
+      "recorded",
+      "confirm",
+      "status",
+      "silent",
+      "200",
+    ],
+    what:
+      "Approving or declining an estimate option answers 200 without echoing the option's new state, so the 2xx alone is not evidence the answer was recorded.",
+    handling:
+      "Read the option's approval_status back with hcp_list_estimates - it reads \"pro approved\" or \"pro declined\" once the answer landed - before reporting it recorded.",
+    kind: "silent",
+  },
+  {
+    id: "estimate-schedule-confirm-by-status",
+    tags: [
+      "estimate",
+      "option",
+      "schedule",
+      "book",
+      "visit",
+      "work_status",
+      "scheduled",
+      "confirm",
+      "silent",
+      "200",
+    ],
+    what:
+      "Scheduling an estimate option answers 200 without echoing the schedule, so the 2xx alone is not evidence the visit was booked.",
+    handling:
+      "Re-read the estimate's work_status with hcp_list_estimates and confirm it moved to scheduled before reporting the visit as booked.",
+    kind: "silent",
+  },
+  {
+    id: "job-has-no-invoice-yet",
+    tags: [
+      "invoice",
+      "job",
+      "empty",
+      "none",
+      "not invoiced",
+      "billing",
+      "billed",
+    ],
+    what:
+      "A job with no invoice returns an empty list on its invoices route. An invoice exists only once the job has been invoiced in Housecall Pro, so a worked-but-not-invoiced job has none - and there is no route to create one - rather than the job id being wrong.",
+    handling:
+      "Read an empty result as \"not invoiced yet\", not as a bad id. hcp_list_invoices finds invoices across the account when you need to reach one another way.",
+    kind: "shape",
+  },
+  // ---- the paid equipment tools (the hcpapi API, not Housecall Pro) ----
 ];
 
 export interface PhantomRoute {
