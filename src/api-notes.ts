@@ -301,6 +301,53 @@ export const API_NOTES: ApiNote[] = [
     kind: "shape",
   },
   {
+    id: "active-job-detection",
+    tags: [
+      "in progress",
+      "active",
+      "right now",
+      "working",
+      "on site",
+      "today",
+      "on_my_way_at",
+      "started_at",
+      "route",
+      "dispatch",
+      "technician",
+      "employee",
+      "timezone",
+      "utc",
+      "offset",
+    ],
+    what:
+      "The 'in progress' work status is rarely maintained on a real account - technicians move between jobs faster than anyone updates a status - so filtering jobs by it can return nothing at all on a busy day, which reads as 'nobody is working' rather than 'this field is not kept'. Route listings are empty too on an account that does not build routes, which many do not.",
+    handling:
+      "To find who is working now, list today's scheduled jobs and read on_my_way_at and started_at on the rows - a job with either set and no completed_at is being worked - then confirm the technician against the row's employees, or pass hcp_list_jobs an employee to narrow the page to one person. Bound the day in your own local offset (2026-08-13T00:00:00-04:00, not a bare UTC midnight): a UTC window against a business in a local timezone shifts the day, dropping an evening job out of 'today' and pulling in a late one from the day before. Never infer whose job it is from a single scheduled row - one row on the list is not evidence it is the right technician's.",
+    kind: "shape",
+  },
+  {
+    id: "equipment-not-on-public-api",
+    tags: [
+      "equipment",
+      "property profile",
+      "custom field",
+      "unit",
+      "serial",
+      "model",
+      "installed",
+      "hvac",
+      "boiler",
+      "furnace",
+      "water heater",
+      "missing",
+    ],
+    what:
+      "Equipment records and property-profile data are not exposed by the public API at all. There is no equipment route, no property-profile route, and no custom-field route to read them through, so searching for one finds nothing however the query is phrased - and expand[]=equipment on a job is accepted and ignored rather than refused.",
+    handling:
+      "Stop looking for an equipment route and take one of the paths that work: a nameplate photo on the job's attachments (list the job with include_attachments and hand the download URL straight to hcp_equipment_age_from_photo, which takes a url); a serial or model written into the job's notes or line items; or asking the customer. If none of those has it, say the unit's identity is not on this surface and name where it is - the equipment record in the Housecall Pro dashboard - rather than reporting an empty search as an absent unit.",
+    kind: "shape",
+  },
+  {
     id: "key-access-fixed-at-creation",
     tags: ["401", "permissions", "key", "access", "read-only", "auth", "404", "unauthorized"],
     what:
