@@ -85,13 +85,13 @@ const MONEY_NOTE =
 const EQUIPMENT_ON_A_JOB =
   "No equipment record comes back with a job - Housecall Pro does not expose one, and no query phrasing finds it. " +
   "Three paths do reach the unit: a nameplate photo on the job's attachments (read the job with include_attachments " +
-  "and hand the download URL straight to hcp_equipment_age_from_photo, which takes a url); a serial or model written " +
-  'into the line items; or asking the technician on site. Topic "equipment-not-on-public-api" in hcp_api_notes has it.';
+  "and the download URL is a working link to the plate); a serial or model written into the line items; or asking " +
+  'the technician on site. Topic "equipment-not-on-public-api" in hcp_api_notes has it.';
 
 const EQUIPMENT_ON_A_CUSTOMER =
   "No equipment record comes back with a customer - Housecall Pro does not expose one. Reach the unit through this " +
-  "customer's jobs instead: a nameplate photo on a job's attachments (hcp_get_job with include_attachments) goes " +
-  "straight to hcp_equipment_age_from_photo, a serial is often written into the line items, or the customer can be " +
+  "customer's jobs instead: a nameplate photo on a job's attachments (hcp_get_job with include_attachments) is a " +
+  "working link to the plate, a serial is often written into the line items, or the customer can be " +
   'asked. Topic "equipment-not-on-public-api" in hcp_api_notes has it.';
 
 /**

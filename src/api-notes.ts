@@ -344,7 +344,7 @@ export const API_NOTES: ApiNote[] = [
     what:
       "Equipment records and property-profile data are not reachable through this API. Searching for a route that reads them finds nothing however the query is phrased, so an empty result here is the surface, not an absent unit.",
     handling:
-      "Stop looking for an equipment route and take one of the paths that work: a nameplate photo on the job's attachments (list the job with include_attachments and hand the download URL straight to hcp_equipment_age_from_photo, which takes a url); a serial or model written into the job's notes or line items; or asking the customer. If none of those has it, say the unit's identity is not on this surface and name where it is - the equipment record in the Housecall Pro dashboard - rather than reporting an empty search as an absent unit.",
+      "Stop looking for an equipment route and take one of the paths that work: a nameplate photo on the job's attachments (list the job with include_attachments; the download URL is a working link to the plate); a serial or model written into the job's notes or line items; or asking the customer. If none of those has it, say the unit's identity is not on this surface and name where it is - the equipment record in the Housecall Pro dashboard - rather than reporting an empty search as an absent unit.",
     kind: "shape",
   },
   {
