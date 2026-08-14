@@ -16,6 +16,7 @@ import {
 } from "./profile.js";
 import { versionCheck } from "./version-check.js";
 import { renderReport } from "./report/render.js";
+import { MINIMAL_REPORT_EXAMPLE } from "./report/validate.js";
 import { analyzeContactability, UNVERIFIABLE } from "./contact.js";
 import {
   API_NOTES,
@@ -4211,8 +4212,14 @@ export function registerTools(
       try {
         const { html, errors, warnings } = renderReport(report);
         if (errors.length || !html) {
+          // Every problem at once, then a skeleton that renders. The errors say
+          // what is wrong; the example says what right looks like, which is what
+          // stops a caller fixing one layer per round trip.
           return errOut(
-            "The report was not rendered — the contract has errors:\n- " + errors.join("\n- "),
+            "The report was not rendered — the contract has errors:\n- " +
+              errors.join("\n- ") +
+              "\n\nA minimal contract that renders:\n" +
+              MINIMAL_REPORT_EXAMPLE,
           );
         }
         const rep = report as { sections?: unknown[] };

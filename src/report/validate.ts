@@ -20,6 +20,34 @@ function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
+/**
+ * The smallest contract that renders.
+ *
+ * Shown with any contract error, because the errors name what is wrong and a
+ * skeleton names what right looks like. A caller that has just been told
+ * "prose block needs 'html'" still has to guess the shape of the block it
+ * wanted; this removes the guess.
+ */
+export const MINIMAL_REPORT_EXAMPLE = `{
+  "skill": "your-skill-name",
+  "title": "Report title",
+  "sections": [
+    {
+      "title": "Section title",
+      "blocks": [
+        { "type": "prose", "html": "<p>Any HTML.</p>" },
+        { "type": "subhead", "text": "A heading" },
+        { "type": "list", "items": ["first", "second"] },
+        {
+          "type": "table",
+          "columns": [{ "label": "Name" }, { "label": "Count", "numeric": true }],
+          "rows": [["a", "1"], ["b", "2"]]
+        }
+      ]
+    }
+  ]
+}`;
+
 export function validateReport(input: unknown): ValidationResult {
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -30,16 +58,19 @@ export function validateReport(input: unknown): ValidationResult {
   }
   const data = input;
 
-  // Required top-level keys. If any are missing the rest cannot be checked
-  // meaningfully, so return early exactly as build.py does.
+  // Required top-level keys.
+  //
+  // Everything that CAN still be checked is checked, even when one of these is
+  // missing. Returning here made a caller fix one layer, re-call, and discover
+  // the next - four round trips for a single malformed report, against a tool
+  // that promises "the exact problems are listed so you can fix and re-call".
   for (const k of ["skill", "title", "sections"]) {
     if (!(k in data)) errors.push(`missing required key '${k}'`);
   }
-  if (errors.length) return { errors, warnings };
 
-  if (!Array.isArray(data.sections)) {
+  const sectionsPresent = "sections" in data;
+  if (sectionsPresent && !Array.isArray(data.sections)) {
     errors.push("'sections' must be a list");
-    return { errors, warnings };
   }
 
   // Recommended keys — present in a full report, not required.
@@ -81,7 +112,8 @@ export function validateReport(input: unknown): ValidationResult {
     });
   }
 
-  data.sections.forEach((sec, si) => {
+  const sections = Array.isArray(data.sections) ? data.sections : [];
+  sections.forEach((sec, si) => {
     const title = isObject(sec) && "title" in sec ? String(sec.title) : "?";
     const where = `sections[${si}] '${title}'`;
     if (!isObject(sec) || !("title" in sec)) {
