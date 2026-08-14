@@ -3,6 +3,39 @@
 Release notes live on [GitHub Releases](https://github.com/hcpapi/housecall-pro-mcp/releases);
 this file is the summary per version.
 
+## 1.16.0 — 2026-08-14
+
+**A parameter a tool does not take is now refused, by name.** Housecall Pro
+accepts an unrecognised query parameter and answers as though it had never been
+asked for, so a filter name that does not exist silently becomes *no* filter and
+the whole account comes back wearing the shape of a narrow question. Invented or
+mistyped parameters are now caught here before anything is sent, naming what was
+not recognised, the closest parameter that does exist, and everything the tool
+takes.
+
+**Credentials and file links stay out of what a tool returns.** Whatever an
+upstream service says when a call fails is cleaned before it reaches the
+assistant: the API key this server holds, and anything else key-shaped, is
+replaced with `[redacted]`. Housecall Pro's own identifiers and ordinary error
+prose are untouched. Attachment links are handed over once rather than echoed.
+
+**A write is no longer reported as done off a bare success.** Where the record
+can be read back, the tool reads it and reports the confirmed state, so a change
+that did not take is called out rather than announced as done. Where there is no
+route to read a write back, the tool says so and hands you the id instead of
+implying a confirmation it cannot give.
+
+**An empty list says which kind of empty it is.** "Nothing matched" and "the
+filter never applied" no longer look identical, so a dropped filter stops reading
+as an absent customer, invoice or job.
+
+**Jobs can be filtered by technician, and carry their work clocks.** Each row
+names the technicians assigned to it, and `on_my_way_at` / `started_at` /
+`completed_at` come back so a job in progress is visible as one.
+
+**New:** a "Where your keys go" section in the README, stating the one host your
+Housecall Pro key reaches.
+
 ## 1.15.1 — 2026-08-10
 
 - Listed in the [MCP Registry](https://registry.modelcontextprotocol.io) as

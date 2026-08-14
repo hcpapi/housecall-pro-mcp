@@ -408,6 +408,18 @@ Your API key goes only to `api.housecallpro.com`. The only other request this
 server ever makes is the version check described under Updating, which carries
 no account data.
 
+## Where your keys go
+
+One key is configured, and it reaches exactly one host.
+
+- Your **Housecall Pro API key** (`HCP_API_KEY`) goes only to
+  `api.housecallpro.com`. Nothing read from your Housecall Pro account is sent
+  anywhere else.
+
+The only other request this server ever makes is the version check described
+under Updating, which carries the product name and installed version and
+nothing else.
+
 ## Limitations
 
 A few more edges that are shape rather than quirk.
