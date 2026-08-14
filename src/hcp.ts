@@ -92,13 +92,24 @@ function elsewhereFor(path: string): string {
 /**
  * What a refused request means, and what to do about it.
  *
- * Housecall Pro returns two different refusal bodies that mean different
+ * Housecall Pro returns THREE different refusal bodies that mean different
  * things, and telling a user the wrong one sends them to fix the wrong
- * problem. A body naming permissions means the key is too narrow for a route a
- * wider key reaches - except on the routes above, where no key reaches it at
- * all. A bare Unauthorized means the key was not accepted here, and when the
- * same key works elsewhere that is the route not taking an API key at all,
- * which no key changes.
+ * problem.
+ *
+ * A body naming permissions means the key is too narrow for a route a wider
+ * key reaches - except on the routes above, where no key reaches it at all.
+ *
+ * A body naming a missing application is not about the key at all: the account
+ * has no API application, and the routes that hang off one answer 401 even for
+ * a key that reads and writes everywhere else. Measured on a live account:
+ * `GET /jobs` 200 and `POST /jobs/{id}/notes` 201 with the same key that gets
+ * `POST /jobs/{id}/links` 401 `{"error":{"message":"Application not found"}}`.
+ * Reading that as a key fault sends the owner to mint a replacement that fails
+ * identically.
+ *
+ * A bare Unauthorized means the key was not accepted here, and when the same
+ * key works elsewhere that is the route not taking an API key at all, which no
+ * key changes.
  */
 export function explainRefusal(body: string, method: string, path: string): string {
   const blocked = NO_KEY_REACHES.find((e) => e.method === method && e.match.test(path));
@@ -107,6 +118,18 @@ export function explainRefusal(body: string, method: string, path: string): stri
   const alternative = elsewhereFor(path);
   const notes =
     'Topic "key-access-fixed-at-creation" in hcp_api_notes says which refusals a different key can fix.';
+
+  if (/application not found/i.test(body)) {
+    return [
+      "This is not a key problem - do not replace the key. This Housecall Pro account has no API " +
+        "application, and the routes that hang off one (job links, webhook subscriptions) refuse even a " +
+        "key that reads and writes everywhere else. Creating an API application on the account is what " +
+        "opens them; a new key will not.",
+      alternative,
+    ]
+      .filter(Boolean)
+      .join(" ");
+  }
 
   if (/necessary permissions/i.test(body)) {
     return [
