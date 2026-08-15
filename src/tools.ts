@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { McpServer, ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { ZodRawShapeCompat } from "@modelcontextprotocol/sdk/server/zod-compat.js";
-import { HcpApiError, HcpClient, centsToDollars, workStatusBucket } from "./hcp.js";
+import { HcpApiError, HcpClient, centsToDollars, localTime, workStatusBucket } from "./hcp.js";
 import {
   DEFAULT_KEYS,
   DEFAULT_KEY_DESCRIPTIONS,
@@ -174,7 +174,7 @@ function trimCustomer(c: any) {
   };
 }
 
-function trimJob(j: any) {
+function trimJob(j: any, timeZone: string | null = null) {
   const employees = Array.isArray(j?.assigned_employees)
     ? j.assigned_employees
         .map((e: any) => ({
@@ -195,12 +195,34 @@ function trimJob(j: any) {
     description: j?.description,
     work_status: j?.work_status,
     work_status_bucket: workStatusBucket(j?.work_status),
+    // When the job record was made. For a job that came in through online
+    // booking that is the moment the customer booked; for one the office typed
+    // in, it is when the office typed it, which can be days after the call.
     created_at: j?.created_at,
+    // Walked newest-first, this is where an incremental read stops - the
+    // sort-by-updated-at note tells callers to do exactly that, so the value
+    // has to be on the row for them to compare against.
+    updated_at: j?.updated_at ?? undefined,
+    // The booking channel, and it rides every row upstream: "Online Booking",
+    // "Reserve with Google", or whatever source the office picked. Dropping it
+    // turned "which of these came in online" into one hcp_get_job per job - a
+    // dogfood run spent six of them re-reading a field the list had already
+    // returned, and still could not answer for the rest.
+    lead_source: j?.lead_source ?? undefined,
     // A canceled job is evidence, not noise: the cancellation time plus the
     // note beside it is usually the whole story of a deal that died.
     canceled_at: j?.canceled_at ?? undefined,
     scheduled_start: j?.schedule?.scheduled_start ?? j?.scheduled_start,
     scheduled_end: j?.schedule?.scheduled_end ?? j?.scheduled_end,
+    // The same two times in the account's own zone. These are the times anyone
+    // says out loud, and the UTC-to-local step is where they get said wrong;
+    // both are present so a caller can quote one and still compute on the
+    // other. Absent when the account's zone is not known.
+    scheduled_start_local: localTime(
+      j?.schedule?.scheduled_start ?? j?.scheduled_start,
+      timeZone,
+    ),
+    scheduled_end_local: localTime(j?.schedule?.scheduled_end ?? j?.scheduled_end, timeZone),
     // The three work clocks. on_my_way_at and started_at are how a job that is
     // being worked right now shows itself: many accounts never move a job into
     // the "in progress" status, so these timestamps are the evidence that
@@ -561,6 +583,21 @@ const ATTACHMENT_NOTE =
   "A download_url is the handle on the file: hand it straight to the tool that needs it, in the same turn, " +
   "and do not repeat it in a reply, a note or a message. Some of these are minted for this response and expire " +
   "within the hour; others carry no expiry at all, so a copy of one keeps working wherever it is left.";
+
+/**
+ * Said when an attachments read comes back empty. An empty list is where the
+ * hunt for a call recording or a text thread lands, and on its own it reads as
+ * "not filed here yet" rather than "never filed here" - which sends an agent on
+ * to the customer, then the leads list, to reach the same no. Closing the
+ * question costs one sentence.
+ */
+const NO_ATTACHMENTS_HERE =
+  "An empty list means no files are on this record. Note that calls, call recordings and transcripts, texts and " +
+  "emails are never filed as attachments and are not on this API at all - no route reaches them and no key changes " +
+  "that - so do not go looking for them on the customer or the leads instead. They live in the call log and Voice " +
+  "section of the Housecall Pro dashboard. What is readable here is the job's own paperwork: the office notes on " +
+  "the job record (often the verbatim intake answer), lead_source for the channel it came in through, and the line " +
+  'items. Topic "calls-and-messages-not-on-public-api" in hcp_api_notes has it.';
 
 /** Count attachments across a list response, for the note. */
 function countAttachments(rows: any[]): number {
@@ -971,7 +1008,9 @@ export function registerTools(
           : [];
         return out(
           { ...(json as any), attachments },
-          `${attachments.length} attachment(s). ${ATTACHMENT_NOTE}${equipment}`,
+          `${attachments.length} attachment(s). ${
+            attachments.length === 0 ? NO_ATTACHMENTS_HERE : ATTACHMENT_NOTE
+          }${equipment}`,
         );
       } catch (e) {
         return errOut(e);
@@ -1058,7 +1097,12 @@ export function registerTools(
       "Each row carries an employees field - the technicians assigned to that job, with id and name - so who is " +
       "on a job is read off the row rather than assumed. Rows also carry on_my_way_at and started_at, which are " +
       "how a job being worked right now shows itself. Rows carrying a deleted_at value are deleted jobs - " +
-      "exclude them from counts and revenue.",
+      "exclude them from counts and revenue. " +
+      "Every row also carries lead_source, the channel the job came in through (\"Online Booking\", " +
+      "\"Reserve with Google\", a source the office picked, or absent when none was recorded) - so which jobs " +
+      "were booked online is read off this one listing, never by fetching each job in turn. " +
+      "Times come back twice: scheduled_start/scheduled_end in UTC, and scheduled_start_local/scheduled_end_local " +
+      "already rendered in the account's own zone. Quote the local ones to a person.",
     {
       work_status: z
         .array(z.enum(["scheduled", "in progress", "completed", "canceled", "needs scheduling"]))
@@ -1112,15 +1156,17 @@ export function registerTools(
           page_size: page_size ?? 25,
         });
         const { items, total_items, total_pages } = hcp.normalizeList(json);
+        // Read once per process, and never a reason to fail the listing.
+        const timeZone = await hcp.accountTimeZone();
         const allRows = items.map((j: any) =>
           include_attachments
             ? {
-                ...trimJob(j),
+                ...trimJob(j, timeZone),
                 attachments: Array.isArray(j?.attachments)
                   ? j.attachments.map(trimAttachment)
                   : [],
               }
-            : trimJob(j),
+            : trimJob(j, timeZone),
         );
         // The employee narrowing happens here because the API offers none.
         // Both counts are reported so the caller can see what was dropped
@@ -1128,6 +1174,12 @@ export function registerTools(
         const filtering = typeof employee === "string" && employee.trim() !== "";
         const rows = filtering ? allRows.filter((r) => jobHasEmployee(r, employee)) : allRows;
         const statusNote = `The work_status field in responses uses HCP's human vocabulary ("complete unrated", "user canceled", ...) - the work_status_bucket field normalizes it.`;
+        // Naming the zone once per response is what stops a UTC time being read
+        // out as a local one. When it is not known, say that plainly instead -
+        // an agent told the times are UTC can at least say so.
+        const zoneNote = timeZone
+          ? ` Every timestamp here is UTC. scheduled_start_local and scheduled_end_local are the same two times in this account's zone (${timeZone}) - quote those to a person, and compute on the UTC ones.`
+          : ` Every timestamp here is UTC and this account's time zone is not known, so no local rendering is given. Say the time is UTC rather than reading it as local, or read the zone from hcp_get_company.`;
         const employeeNote = filtering
           ? ` Housecall Pro has no employee filter, so "${employee}" was matched here against the employees on ` +
             `the ${allRows.length} row(s) this page returned: ${rows.length} matched. total_items and total_pages ` +
@@ -1162,8 +1214,13 @@ export function registerTools(
             jobs: rows,
           },
           include_attachments
-            ? `${MONEY_NOTE} ${statusNote} ${countAttachments(filtering ? rows : (items as any[]))} attachment(s) on this page. ${ATTACHMENT_NOTE}${employeeNote}${empty}`
-            : `${MONEY_NOTE} ${statusNote}${employeeNote}${empty}`,
+            ? (() => {
+                const n = countAttachments(filtering ? rows : (items as any[]));
+                return `${MONEY_NOTE} ${statusNote}${zoneNote} ${n} attachment(s) on this page. ${
+                  n === 0 ? NO_ATTACHMENTS_HERE : ATTACHMENT_NOTE
+                }${employeeNote}${empty}`;
+              })()
+            : `${MONEY_NOTE} ${statusNote}${zoneNote}${employeeNote}${empty}`,
         );
       } catch (e) {
         return errOut(e);
@@ -1187,13 +1244,35 @@ export function registerTools(
         const params = include_attachments ? { "expand[]": "attachments" } : undefined;
         const json = await hcp.request(`/jobs/${job_id}`, params);
         const equipment = carriesEquipmentIdentity(json) ? "" : ` ${EQUIPMENT_ON_A_JOB}`;
-        if (!include_attachments) return out(json, `${MONEY_NOTE}${equipment}`);
+        // The record passes through as Housecall Pro sends it, which means UTC.
+        // The local rendering rides alongside rather than replacing anything,
+        // so the raw times stay available to compute on.
+        const timeZone = await hcp.accountTimeZone();
+        const start = localTime((json as any)?.schedule?.scheduled_start, timeZone);
+        const end = localTime((json as any)?.schedule?.scheduled_end, timeZone);
+        const scheduleLocal =
+          start || end
+            ? {
+                schedule_local: {
+                  time_zone: timeZone,
+                  ...(start ? { scheduled_start_local: start } : {}),
+                  ...(end ? { scheduled_end_local: end } : {}),
+                },
+              }
+            : {};
+        const zone = start || end
+          ? ` Timestamps on the record are UTC; schedule_local carries the same visit times in the account's zone (${timeZone}) - quote those to a person.`
+          : ` Timestamps on the record are UTC. Convert before quoting a time to a person; the account's zone is on hcp_get_company.`;
+        if (!include_attachments)
+          return out({ ...(json as any), ...scheduleLocal }, `${MONEY_NOTE}${zone}${equipment}`);
         const attachments = Array.isArray((json as any)?.attachments)
           ? (json as any).attachments.map(trimAttachment)
           : [];
         return out(
-          { ...(json as any), attachments },
-          `${MONEY_NOTE} ${attachments.length} attachment(s). ${ATTACHMENT_NOTE}${equipment}`,
+          { ...(json as any), ...scheduleLocal, attachments },
+          `${MONEY_NOTE}${zone} ${attachments.length} attachment(s). ${
+            attachments.length === 0 ? NO_ATTACHMENTS_HERE : ATTACHMENT_NOTE
+          }${equipment}`,
         );
       } catch (e) {
         return errOut(e);
@@ -3218,7 +3297,9 @@ export function registerTools(
   tool(
     "hcp_list_leads",
     "List leads - unconverted enquiries, which are a separate record type from jobs and estimates. " +
-      "Filter by customer, or sort by most recently updated to see what moved.",
+      "Filter by customer, or sort by most recently updated to see what moved. " +
+      "A lead does not carry a call recording, a transcript or a text thread, and neither does anything else on " +
+      "this API - so this is not the place to look for one after a job and a customer came back without it.",
     {
       customer_id: z.string().optional().describe("Only this customer's leads"),
       newest_first: z

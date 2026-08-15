@@ -255,6 +255,9 @@ export class HcpClient {
     private baseUrl: string = BASE_URL,
   ) {}
 
+  /** Memoised /company lookup behind accountTimeZone(); null means "not known". */
+  private timeZonePromise?: Promise<string | null>;
+
   /**
    * An upstream body, made safe to hand to the model. Redaction runs BEFORE
    * the length cap: capping first would cut a key in half and leave the front
@@ -317,6 +320,29 @@ export class HcpClient {
       }
       throw new HcpApiError(`HTTP ${res.status} for ${path}. ${detail}`, res.status, requestId, detail);
     }
+  }
+
+  /**
+   * The account's own IANA time zone, read once and remembered for the life of
+   * the process. Every timestamp Housecall Pro returns is UTC, and a shop reads
+   * its day in local time - so a job at 16:00Z is noon to the office, and an
+   * answer that says four o'clock names a time nobody is working.
+   *
+   * The lookup is best-effort by design: an account that has never set a zone,
+   * a key too narrow for /company, or an outage all resolve to null, and the
+   * caller falls back to reporting UTC plainly rather than failing the read.
+   * One /company call per process, so a hundred rows cost nothing extra.
+   */
+  async accountTimeZone(): Promise<string | null> {
+    if (this.timeZonePromise === undefined) {
+      this.timeZonePromise = this.request("/company")
+        .then((json: any) => {
+          const tz = json?.time_zone;
+          return typeof tz === "string" && tz.trim() !== "" ? tz : null;
+        })
+        .catch(() => null);
+    }
+    return this.timeZonePromise;
   }
 
   /**
@@ -540,6 +566,45 @@ export function centsToDollars(cents: unknown): number | null {
   return typeof cents === "number" && Number.isFinite(cents)
     ? Math.round(cents) / 100
     : null;
+}
+
+/**
+ * A UTC timestamp rendered in the account's own zone, as a person would say it:
+ * "2026-08-18 12:00 PM EDT". Housecall Pro answers in UTC and a shop speaks
+ * local, and the arithmetic between the two is where an agent quotes a job four
+ * hours off - twice in one dogfood session, including two different times for
+ * the same job in a single answer.
+ *
+ * Returns undefined rather than a guess whenever the conversion cannot be
+ * trusted: no zone known, no timestamp, an unparseable value, or a zone this
+ * runtime's ICU data does not carry. The raw UTC field is always still there.
+ */
+export function localTime(iso: unknown, timeZone: string | null): string | undefined {
+  if (!timeZone || typeof iso !== "string" || iso.trim() === "") return undefined;
+  const ms = Date.parse(iso);
+  if (!Number.isFinite(ms)) return undefined;
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+      timeZoneName: "short",
+    }).formatToParts(new Date(ms));
+    const at = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+    const date = `${at("year")}-${at("month")}-${at("day")}`;
+    const time = `${at("hour")}:${at("minute")} ${at("dayPeriod")}`.trim();
+    const zone = at("timeZoneName");
+    if (!at("year") || !at("hour")) return undefined;
+    return zone ? `${date} ${time} ${zone}` : `${date} ${time}`;
+  } catch {
+    // An unknown zone throws rather than falling back, and a wrong local time
+    // is worse than none: let the caller report UTC.
+    return undefined;
+  }
 }
 
 /** Normalize Housecall Pro's work_status values into stable buckets. */

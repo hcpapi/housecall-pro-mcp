@@ -348,6 +348,53 @@ export const API_NOTES: ApiNote[] = [
     kind: "shape",
   },
   {
+    id: "calls-and-messages-not-on-public-api",
+    tags: [
+      "call",
+      "recording",
+      "transcript",
+      "transcription",
+      "voicemail",
+      "phone",
+      "voice",
+      "sms",
+      "text",
+      "message",
+      "conversation",
+      "chat",
+      "email",
+      "communication",
+      "activity",
+      "history",
+    ],
+    what:
+      "Phone calls, call recordings and transcriptions, texts, emails and the customer conversation thread are not on this API. Every route that would hold them - calls, voice, communications, conversations, messages, activities - answers with an HTML 404, which is routing refusing a path that does not exist rather than a key being too narrow, so no key reaches them. Attachments are files on a job or customer and a recording is not filed as one, so an empty attachment list is not evidence the call was never made.",
+    handling:
+      "Answer in one step rather than searching. Say plainly that Housecall Pro does not expose call recordings or transcripts on the public API, and name where the record does live: the customer's activity feed and the Voice section in the Housecall Pro dashboard. What IS readable and usually carries the same content is the job's own paperwork - the office notes on the job record (often a verbatim intake answer, e.g. \"Are you currently experiencing any issues?\"), lead_source on the job row for the channel it came in through, and the job's line items. Reach for those instead of checking attachments on the job, then the customer, then the leads list, which is three calls to reach the same no.",
+    kind: "shape",
+  },
+  {
+    id: "job-times-are-utc",
+    tags: [
+      "timezone",
+      "time zone",
+      "utc",
+      "local",
+      "offset",
+      "scheduled_start",
+      "scheduled_end",
+      "time",
+      "appointment",
+      "morning",
+      "afternoon",
+    ],
+    what:
+      "Every timestamp Housecall Pro returns is UTC with a Z suffix, and a shop reads its day in local time. A job at 16:00Z is noon to an Eastern office; read out as-is it becomes four o'clock, which names a time nobody is working and can move a job to the wrong half of the day.",
+    handling:
+      "Job rows from hcp_list_jobs carry scheduled_start_local and scheduled_end_local already rendered in the account's zone, and hcp_get_job carries the same under schedule_local - quote those to a person and compute on the UTC fields. For any other timestamp, read the account's zone from hcp_get_company (time_zone) and convert before saying it aloud. The same fault line runs the other way on input: bound a day window with your own local offset, not a bare UTC midnight - topic \"active-job-detection\" has it.",
+    kind: "shape",
+  },
+  {
     id: "key-access-fixed-at-creation",
     tags: ["401", "permissions", "key", "access", "read-only", "auth", "404", "unauthorized"],
     what:
