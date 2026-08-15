@@ -205,9 +205,8 @@ function trimJob(j: any, timeZone: string | null = null) {
     updated_at: j?.updated_at ?? undefined,
     // The booking channel, and it rides every row upstream: "Online Booking",
     // "Reserve with Google", or whatever source the office picked. Dropping it
-    // turned "which of these came in online" into one hcp_get_job per job - a
-    // dogfood run spent six of them re-reading a field the list had already
-    // returned, and still could not answer for the rest.
+    // turns "which of these came in online" into one hcp_get_job per row, and
+    // the listing has already returned the answer.
     lead_source: j?.lead_source ?? undefined,
     // A canceled job is evidence, not noise: the cancellation time plus the
     // note beside it is usually the whole story of a deal that died.

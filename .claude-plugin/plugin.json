@@ -1,7 +1,7 @@
 {
   "name": "housecall-pro",
   "displayName": "Housecall Pro",
-  "version": "1.16.0",
+  "version": "1.17.0",
   "description": "Ask your Housecall Pro account for what you need instead of clicking through reports.",
   "author": {
     "name": "HCP API",

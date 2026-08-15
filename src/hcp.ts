@@ -570,10 +570,10 @@ export function centsToDollars(cents: unknown): number | null {
 
 /**
  * A UTC timestamp rendered in the account's own zone, as a person would say it:
- * "2026-08-18 12:00 PM EDT". Housecall Pro answers in UTC and a shop speaks
- * local, and the arithmetic between the two is where an agent quotes a job four
- * hours off - twice in one dogfood session, including two different times for
- * the same job in a single answer.
+ * `YYYY-MM-DD h:mm AM EDT`. Housecall Pro answers in UTC and a shop speaks
+ * local, and the arithmetic between the two is where a caller reports a job
+ * hours off - a midday visit read back as an evening one, or the same visit
+ * given two different times in one answer.
  *
  * Returns undefined rather than a guess whenever the conversion cannot be
  * trusted: no zone known, no timestamp, an unparseable value, or a zone this

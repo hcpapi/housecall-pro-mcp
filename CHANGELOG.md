@@ -3,6 +3,57 @@
 Release notes live on [GitHub Releases](https://github.com/hcpapi/housecall-pro-mcp/releases);
 this file is the summary per version.
 
+## 1.17.0 — 2026-08-15
+
+**Which jobs came in through online booking is now one call.** Every job row
+carries `lead_source` — the channel the job arrived through, such as *Online
+Booking* or *Reserve with Google* — so asking which of this week's jobs were
+booked online is answered by the listing itself. It was already in Housecall
+Pro's response on every row and this server was discarding it, which turned the
+question into one job read per job and still left it unanswerable for the rest.
+Rows also carry `updated_at`, which walking a list newest-first to find what
+changed has always needed and never had.
+
+**Visit times come back in your own time zone.** Housecall Pro answers in UTC,
+and a job at `16:00Z` is noon to a shop running Eastern — read back as-is it
+becomes four o'clock, which is the wrong half of the day. Job rows now carry
+`scheduled_start_local` and `scheduled_end_local` rendered in the account's own
+zone, and a single job carries the same under `schedule_local`. The UTC fields
+are untouched, so anything computing on them is unaffected: quote the local
+ones, compute on the raw ones. The zone is read once per process from the
+company profile; an account that has never set one, or a key that cannot read
+it, degrades to UTC with a note saying so rather than to a guess.
+
+**Dead ends name the way out.** An empty attachment list now says what is never
+filed as an attachment: calls, call recordings and transcripts, texts and
+emails are not on Housecall Pro's public API at all — no route reaches them and
+no key changes that — and they live in the Voice and call-log section of the
+dashboard instead. Previously an empty list read as *not filed yet*, sending a
+search on to the customer and then the leads list to reach the same answer.
+`hcp_list_leads` says the same in its own description, and a new
+`calls-and-messages-not-on-public-api` topic in `hcp_api_notes` has the detail.
+
+**A missing API application is no longer reported as a key problem.** Housecall
+Pro returns 401 for a third reason the explanation did not know about: routes
+that hang off an API application — job links and webhook subscriptions —
+refuse with *Application not found* on a key that is provably fine everywhere
+else. The old wording sent the owner to mint a replacement key that would fail
+identically. The refusal now names the real cause, says plainly not to replace
+the key, and names which routes are affected.
+
+**A malformed report comes back with every problem at once.** `hcp_render_report`
+promised the exact problems so a caller could fix and re-call, then returned
+the first one and stopped — four round trips to fix one payload. Everything
+checkable is now checked in one pass, and a contract error carries a minimal
+report that actually renders, so a caller told *prose block needs html* can see
+the shape rather than guess it.
+
+**No guidance names a tool that is not there.** Three strings still pointed at
+an equipment tool this package no longer registers. Naming a tool that does not
+exist is worse than naming none — it reads as a working path — so the guidance
+now names the attachment link, which is the route that works. A test asserts no
+description or note names an unregistered tool.
+
 ## 1.16.0 — 2026-08-14
 
 **A parameter a tool does not take is now refused, by name.** Housecall Pro
