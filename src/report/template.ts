@@ -155,18 +155,31 @@ footer.rpt{border-top:1px solid var(--line);margin-top:24px;padding-top:12px;
 }
 `;
 
-/** The browser renderer, as source inlined into the report. */
+/**
+ * The browser renderer, as source inlined into the report.
+ *
+ * A named function rather than an IIFE, because the report now has two ways to
+ * get its data. A downloaded file still parses it out of an inlined script tag
+ * and calls this immediately; an MCP App receives it from the host over
+ * postMessage, after the document has already loaded, and calls the same
+ * function then. One renderer, two bootstraps - so an interactive report and a
+ * saved file can never drift apart.
+ */
 const APP = `
-(function(){
+function __hcpRenderReport(data){
   "use strict";
-  var data = JSON.parse(document.getElementById("report-data").textContent);
   var root = document.getElementById("app");
+  root.innerHTML = "";   // a host may push a second result into the same document
   var selections = {};   // tableId -> {title, rows, set:Set(originalIdx)}
 
   function el(tag, cls, html){ var e=document.createElement(tag); if(cls)e.className=cls;
     if(html!=null)e.innerHTML=html; return e; }
 
-  var clipTa=el("textarea","offscreen"); document.body&&document.body.appendChild(clipTa);
+  // One offscreen textarea per document, not per render: re-rendering would
+  // otherwise leave a stack of them behind.
+  var clipTa=document.getElementById("__hcp-clip");
+  if(!clipTa){ clipTa=el("textarea","offscreen"); clipTa.id="__hcp-clip";
+    document.body&&document.body.appendChild(clipTa); }
   function copyText(s){ clipTa.value=s; clipTa.select();
     try{navigator.clipboard.writeText(s)}catch(e){} try{document.execCommand("copy")}catch(e){} }
   function downloadCsv(csv,name){ var a=el("a"); a.href="data:text/csv;charset=utf-8,"+encodeURIComponent(csv);
@@ -387,7 +400,7 @@ const APP = `
   // default theme is light; honor a prior explicit toggle only.
   try{ if(localStorage.getItem("hcpapi-report-theme")==="dark"){
     document.documentElement.setAttribute("data-theme","dark"); themeBtn.textContent="Light"; } }catch(e){}
-})();
+}
 `;
 
 /** The full template with `__TITLE__` and `__REPORT_JSON__` tokens for render.ts. */
@@ -406,6 +419,190 @@ export function reportTemplate(): string {
 <script>
 ${inlinedHelpers()}
 ${APP}
+__hcpRenderReport(JSON.parse(document.getElementById("report-data").textContent));
+</script>
+</body>
+</html>`;
+}
+
+/**
+ * The host bridge for the MCP App build of the report.
+ *
+ * Hand-written rather than taking `@modelcontextprotocol/ext-apps`: its browser
+ * bundle is 337 KB, which would be inlined into a document whose whole point is
+ * that it is small and self-contained, and it expects a bundler this package
+ * deliberately does not have. The extension's own guidance is that the `App`
+ * class is a convenience and the postMessage protocol may be spoken directly.
+ * What is actually needed is small - a handshake, one notification, and a size
+ * report - and the wire names below are pinned by the tests.
+ *
+ * Ordering matters: the message listener is installed before `ui/initialize` is
+ * sent, because `ui/notifications/tool-result` is a one-shot the host may
+ * deliver the instant the handshake completes. Registering it afterwards is a
+ * race that loses the only copy of the data.
+ */
+const HOST_BRIDGE = `
+(function(){
+  "use strict";
+  var PROTOCOL_VERSION = "2026-01-26";
+  var nextId = 1, pending = {};
+
+  function send(msg){ try{ window.parent.postMessage(msg, "*"); }catch(e){} }
+  function notify(method, params){ send({jsonrpc:"2.0", method:method, params:params||{}}); }
+  function request(method, params){
+    return new Promise(function(resolve, reject){
+      var id = nextId++;
+      pending[id] = {resolve:resolve, reject:reject};
+      send({jsonrpc:"2.0", id:id, method:method, params:params});
+    });
+  }
+
+  function applyTheme(ctx){
+    if(!ctx) return;
+    if(ctx.theme==="dark"||ctx.theme==="light"){
+      document.documentElement.setAttribute("data-theme", ctx.theme);
+    }
+  }
+
+  // Tell the host how tall we are so it can size the iframe.
+  //
+  // Measured inside requestAnimationFrame, never synchronously: an iframe that
+  // has only just been handed its document reports a viewport width of 0 for a
+  // frame or two, and a measurement taken then says the report is 0 wide and
+  // several thousand pixels tall - because at zero width every cell wraps. A
+  // host that sizes itself on that draws an unusable report. So a zero width is
+  // treated as "layout is not ready" and dropped; the observer below fires
+  // again once it is. Repeats are suppressed so a reflow storm is not a message
+  // storm.
+  var sizePending = false, lastW = 0, lastH = 0, zeroTries = 0;
+
+  function measureNow(){
+    try{
+      var w = Math.ceil(window.innerWidth);
+      if(!w){
+        // Not ready yet. A ResizeObserver delivers its first callback
+        // immediately on observe, which for a freshly created iframe lands
+        // inside that zero-width window - and nothing resizes afterwards, so
+        // waiting for another callback waits forever. Poll briefly instead,
+        // bounded so this cannot spin.
+        if(zeroTries++ < 20) setTimeout(measureNow, 50);
+        return;
+      }
+      zeroTries = 0;
+      var d=document.documentElement, prev=d.style.height;
+      d.style.height="max-content";
+      var h=Math.ceil(d.getBoundingClientRect().height);
+      d.style.height=prev;
+      if(!h || (w===lastW && h===lastH)) return;
+      lastW=w; lastH=h;
+      notify("ui/notifications/size-changed", {width:w, height:h});
+    }catch(e){}
+  }
+
+  // Measure after a frame so the number reflects settled layout, but never
+  // depend on a frame arriving: a document in a hidden or backgrounded tab is
+  // not composited and its requestAnimationFrame callbacks do not run at all,
+  // so an app rendered off-screen would otherwise never tell the host its size
+  // and would still be wrong when the user switched to it. The timer is the
+  // floor under that; whichever fires first wins and the other is a no-op.
+  function reportSize(){
+    if(sizePending) return;
+    sizePending = true;
+    var done = false;
+    var run = function(){ if(done) return; done = true; sizePending = false; measureNow(); };
+    if(window.requestAnimationFrame) window.requestAnimationFrame(run);
+    setTimeout(run, 120);
+  }
+
+  // A result carries the contract in structuredContent. Older hosts that only
+  // forward content blocks still work: the same JSON rides in the text block.
+  function dataFrom(result){
+    if(!result) return null;
+    if(result.structuredContent) return result.structuredContent;
+    var blocks = result.content || [];
+    for(var i=0;i<blocks.length;i++){
+      if(blocks[i] && blocks[i].type==="text"){
+        try{ return JSON.parse(blocks[i].text); }catch(e){}
+      }
+    }
+    return null;
+  }
+
+  function render(result){
+    var data = dataFrom(result);
+    if(!data) return;
+    try{ __hcpRenderReport(data); reportSize(); }
+    catch(e){
+      var root=document.getElementById("app");
+      if(root) root.textContent="This report could not be displayed: "+(e&&e.message?e.message:e);
+    }
+  }
+
+  window.addEventListener("message", function(ev){
+    if(ev.source !== window.parent) return;
+    var m = ev.data;
+    if(!m || m.jsonrpc !== "2.0") return;
+
+    if(m.id != null && pending[m.id]){
+      var p = pending[m.id]; delete pending[m.id];
+      if(m.error) p.reject(new Error(m.error.message || "host error"));
+      else p.resolve(m.result);
+      return;
+    }
+    if(m.method === "ping" && m.id != null){ send({jsonrpc:"2.0", id:m.id, result:{}}); return; }
+    if(m.method === "ui/notifications/tool-result"){ render(m.params); return; }
+    if(m.method === "ui/notifications/host-context-changed"){ applyTheme(m.params); return; }
+  });
+
+  // A plain resize listener misses the case that actually matters: the first
+  // layout after the document is handed to the iframe, which is when the width
+  // goes from 0 to real without a resize event ever firing. Observing the
+  // document catches that, and any later reflow (a table expanding, a font
+  // arriving) for free.
+  window.addEventListener("resize", reportSize);
+  if(window.ResizeObserver){
+    var ro = new ResizeObserver(function(){ reportSize(); });
+    ro.observe(document.documentElement);
+    if(document.body) ro.observe(document.body);
+  }
+
+  request("ui/initialize", {
+    appInfo: {name:"housecall-pro-report", version:"__VERSION__"},
+    appCapabilities: {},
+    protocolVersion: PROTOCOL_VERSION
+  }).then(function(res){
+    applyTheme(res && res.hostContext);
+    notify("ui/notifications/initialized");
+    reportSize();
+  }).catch(function(){
+    // No host answered the handshake. Leave the placeholder in place rather
+    // than pretending the report is empty.
+  });
+})();
+`;
+
+/**
+ * The MCP App build of the report: the same renderer, no data baked in.
+ *
+ * The host fetches this once - possibly before the tool is even called - and
+ * may reuse it, so nothing report-specific can live here. The data arrives
+ * afterwards over postMessage.
+ */
+export function reportAppTemplate(version: string): string {
+  return `<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Housecall Pro report</title>
+<style>${STYLE}</style>
+</head>
+<body>
+<div class="wrap"><div id="app"><p class="kicker">Preparing the report…</p></div></div>
+<script>
+${inlinedHelpers()}
+${APP}
+${HOST_BRIDGE.replace("__VERSION__", () => version)}
 </script>
 </body>
 </html>`;

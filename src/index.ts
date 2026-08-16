@@ -5,6 +5,7 @@ import { HcpClient } from "./hcp.js";
 import { registerApiNoteResources, registerTools } from "./tools.js";
 import { INSTALLED_VERSION, versionCheck } from "./version-check.js";
 import { SERVER_INSTRUCTIONS } from "./api-notes.js";
+import { declareAppCapability, registerReportApp } from "./mcp-app.js";
 import { TOOLSETS, TOOL_SPECS, parseSurfaceOptions, shouldRegister } from "./toolsets.js";
 
 const VERSION = INSTALLED_VERSION;
@@ -88,6 +89,14 @@ const server = new McpServer(
 // key can never reach a request.
 registerTools(server, new HcpClient(apiKey ?? "keyless"), options);
 registerApiNoteResources(server);
+
+// The report surface. Both of these must happen before connect: capabilities
+// can only be registered while the transport is still detached, and a host that
+// never sees the declaration will not ask for the UI resource. Registered even
+// keyless, because the report renderer itself is available keyless - somebody
+// working from dashboard CSV exports gets the interactive report too.
+declareAppCapability(server);
+registerReportApp(server, VERSION);
 
 // Disclosed update check (see the README's Updating section). Fire-and-forget:
 // it never delays a tool call, and any failure is silent.

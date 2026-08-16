@@ -17,6 +17,7 @@ import {
 import { versionCheck } from "./version-check.js";
 import { renderReport } from "./report/render.js";
 import { MINIMAL_REPORT_EXAMPLE } from "./report/validate.js";
+import { REPORT_UI_URI, appToolMeta, hostRendersApps } from "./mcp-app.js";
 import { analyzeContactability, UNVERIFIABLE } from "./contact.js";
 import {
   API_NOTES,
@@ -810,6 +811,17 @@ export function recordHasIds(got: unknown, want: string[]): boolean | "unknown" 
  * advertises no extra properties does not prevent this: the invented filter
  * that prompted the guard was sent against a schema that already said so.
  */
+/**
+ * Per-tool `_meta`, keyed by tool name.
+ *
+ * Kept as a table beside TOOL_SPECS rather than threaded through every
+ * registration call, because exactly one tool needs it and adding a parameter
+ * to the registrar for that would touch all 95 call sites to serve one.
+ */
+const TOOL_META: Record<string, Record<string, unknown>> = {
+  hcp_render_report: appToolMeta(REPORT_UI_URI),
+};
+
 export function makeToolRegistrar(server: McpServer, opts: SurfaceOptions) {
   return <Args extends ZodRawShapeCompat>(
     name: string,
@@ -826,9 +838,29 @@ export function makeToolRegistrar(server: McpServer, opts: SurfaceOptions) {
     }) as ToolCallback<Args>;
 
     const spec = TOOL_SPECS[name];
-    const registered = spec
-      ? server.tool(name, description, schema, annotationsFor(name, spec), guarded)
-      : server.tool(name, description, schema, guarded);
+    const annotations = spec ? annotationsFor(name, spec) : undefined;
+    const meta = TOOL_META[name];
+
+    // `registerTool` is the current SDK entry point; every `server.tool`
+    // overload is marked deprecated. It is also the only one that carries
+    // `_meta`, which is how a tool says which MCP App renders it. The older
+    // call is kept as a fallback for an embedder standing in its own object
+    // that implements only `tool` - dropping it would break them silently.
+    const reg = (server as any).registerTool?.bind(server);
+    const registered = reg
+      ? reg(
+          name,
+          {
+            description,
+            inputSchema: schema,
+            ...(annotations ? { annotations } : {}),
+            ...(meta ? { _meta: meta } : {}),
+          },
+          guarded,
+        )
+      : annotations
+        ? server.tool(name, description, schema, annotations, guarded)
+        : server.tool(name, description, schema, guarded);
 
     // Keep undeclared arguments alive as far as the wrapper above. Without
     // this the SDK hands the handler a cleaned-up object and the refusal has
@@ -4307,16 +4339,26 @@ export function registerTools(
       "link opening in a new tab (http/https only) - use it to link records to their pages in the " +
       "owner's own dashboard. Keep money as display strings; exports and paste-backs show a link's " +
       "text without the URL.\n\n" +
-      "The tool returns the finished HTML. In Claude Code, write it to a `.html` file and give the owner " +
-      "the path; on Claude Desktop, present it as an HTML artifact. On a contract error nothing renders " +
-      "and the exact problems are listed so you can fix and re-call.",
+      "Where the report ends up depends on the client, and the response says which happened. On a client " +
+      "that displays reports inline (Claude and Claude Desktop), it opens in the conversation on its own " +
+      "and the response is a short confirmation - do not repeat the contents or save a file. Everywhere " +
+      "else the response carries the finished HTML: in Claude Code write it to a `.html` file and give the " +
+      "owner the path. On a contract error nothing renders and the exact problems are listed so you can " +
+      "fix and re-call.",
     {
       report: z
         .object({})
         .passthrough()
         .describe("The report contract object (see the description for its shape)."),
+      as_file: z
+        .boolean()
+        .optional()
+        .describe(
+          "Force the standalone HTML file back even on a client that displays the report inline. " +
+            "Use only if the owner says nothing appeared.",
+        ),
     },
-    async ({ report }) => {
+    async ({ report, as_file }) => {
       try {
         const { html, errors, warnings } = renderReport(report);
         if (errors.length || !html) {
@@ -4333,16 +4375,51 @@ export function registerTools(
         const rep = report as { sections?: unknown[] };
         const secN = Array.isArray(rep.sections) ? rep.sections.length : 0;
         const kb = Math.round(Buffer.byteLength(html, "utf8") / 1024);
-        const summary =
-          `Report rendered: ${secN} section(s), ${kb}KB, self-contained and offline. ` +
-          `In Claude Code write the HTML below to a .html file and tell the owner the path; ` +
-          `on Claude Desktop present it as an HTML artifact.` +
-          (warnings.length ? `\nRendered with warnings: ${warnings.join("; ")}` : "");
+        const warn = warnings.length ? `\nRendered with warnings: ${warnings.join("; ")}` : "";
         const notice = versionCheck.consumeNotice();
+        const tail = notice ? `\n\n${notice}` : "";
+
+        // A host that renders MCP Apps has already been handed this report as a
+        // live surface, so shipping the HTML as well would put tens of
+        // kilobytes into the conversation for the model to be told to ignore.
+        // `as_file` is the way back out: it is the recovery path if the host
+        // negotiated the extension and then failed to draw anything, which is a
+        // known and currently unfixed client bug rather than a hypothetical.
+        const inline = hostRendersApps(server) && !as_file;
+
+        if (inline) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text:
+                  `Report displayed: ${secN} section(s). It is open in the conversation now — ` +
+                  `do not repeat its contents, re-render it, or save it to a file unless the owner ` +
+                  `asks. If nothing appeared for them, call this again with as_file: true to get the ` +
+                  `report as a standalone HTML file instead.` +
+                  warn +
+                  tail,
+              },
+            ],
+            structuredContent: report as Record<string, unknown>,
+          };
+        }
+
         return {
           content: [
-            { type: "text" as const, text: summary + (notice ? `\n\n${notice}` : "") + "\n\n" + html },
+            {
+              type: "text" as const,
+              text:
+                `Report rendered: ${secN} section(s), ${kb}KB, self-contained and offline. ` +
+                `In Claude Code write the HTML below to a .html file and tell the owner the path; ` +
+                `on Claude Desktop present it as an HTML artifact.` +
+                warn +
+                tail +
+                "\n\n" +
+                html,
+            },
           ],
+          structuredContent: report as Record<string, unknown>,
         };
       } catch (e) {
         return errOut(e);

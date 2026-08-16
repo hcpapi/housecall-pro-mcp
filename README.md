@@ -188,7 +188,7 @@ see [Choosing which tools to register](#choosing-which-tools-to-register).
 | `hcp_list_employees` | Employees and roles |
 | `hcp_list_tags` · `hcp_list_job_types` · `hcp_list_lead_sources` | Account lookups |
 | `hcp_revenue_summary` | Invoiced revenue by month or line item |
-| `hcp_render_report` | Turn findings into one self-contained interactive HTML report — sortable tables, selectable rows, print. Makes no API call |
+| `hcp_render_report` | Turn findings into one interactive report — sortable tables, selectable rows, print. Opens in the conversation on clients that support it, and comes back as a self-contained HTML file everywhere else. Makes no API call |
 | `hcp_export_csv` | CSV export of customers, jobs, invoices or estimates |
 | `hcp_api_notes` | What the API actually does for a topic, where that differs from its documentation. Answers from a compiled table, so it makes no request |
 
@@ -357,6 +357,17 @@ customer, because they are.
 No tool here sends an email, a text or an estimate on your behalf. Drafting an
 estimate leaves it sitting as a draft, and sending it stays a deliberate action
 you take inside Housecall Pro.
+
+Reports open where you are reading. On a client that supports MCP Apps —
+Claude and Claude Desktop today, not Claude Code — `hcp_render_report` renders
+in the conversation itself: the same sortable, filterable report, with its rows
+still selectable back into chat. Nothing is downloaded and no file is written.
+Everywhere else the tool returns the report as one self-contained HTML file
+exactly as before, so nothing depends on the feature being there. The report
+makes no network request in either form, which is also what lets it run under
+the strict content policy those clients apply. If your client says it supports
+this and you still see nothing, ask for the report again with `as_file` and you
+will get the file version back.
 
 **Dispatching a crew is customer-visible.** `hcp_dispatch_job` puts technicians
 on a job's work, and that route is one the customer can see: Housecall Pro may
