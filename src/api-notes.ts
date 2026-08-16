@@ -374,6 +374,55 @@ export const API_NOTES: ApiNote[] = [
     kind: "shape",
   },
   {
+    id: "estimate-and-invoice-views-not-on-public-api",
+    tags: [
+      "viewed",
+      "view",
+      "opened",
+      "read",
+      "seen",
+      "clicked",
+      "click",
+      "engagement",
+      "receipt",
+      "delivered",
+      "delivery",
+      "sent",
+      "tracking",
+      "followup",
+      "follow up",
+      "ignored",
+      "activity",
+      "feed",
+    ],
+    what:
+      "Whether a customer opened or clicked an estimate or invoice IS tracked by Housecall Pro, but not on this API. The record lives on the activity feed, where a notification row carries a receipt list reading 'sent', 'delivered', 'link clicked (N)' and 'opened (N)' with timestamps and counts. That feed answers 401 to every key whatever its scope, so no key reaches it and an empty search is the surface refusing, not an unopened estimate. hcp_list_events and hcp_get_event are deliveries of YOUR webhook subscriptions and carry no customer view data - the word 'event' on this API never means the activity feed.",
+    handling:
+      "Answer in one step rather than searching. Say plainly that open and click tracking is not on the public API, and name where it is: the activity feed on the estimate or invoice in the Housecall Pro dashboard, which lists sent, delivered, link clicked and opened with times. What IS readable here is whether they ACTED - approval_status on each estimate option (see estimate-answer-confirm-by-status) and the invoice status. Never read an unanswered estimate as an unopened one: approval_status says nothing about viewing, and 'they have not looked at it yet' inferred from silence there is a confident wrong answer about a customer who may have opened it twice.",
+    kind: "shape",
+  },
+  {
+    id: "job-fields-beyond-job-type-not-on-public-api",
+    tags: [
+      "callback",
+      "callbacks",
+      "business unit",
+      "business_unit",
+      "job field",
+      "job fields",
+      "rework",
+      "return visit",
+      "warranty",
+      "segment",
+      "division",
+    ],
+    what:
+      "Job Type is the only Job Field this API exposes. Callback and Business Unit are first-class Job Fields in Housecall Pro - they sit beside Job Type on the job, drive callback-rate and per-unit reporting, and are configured in the dashboard - but neither appears on the job record and neither has a route in any spelling: /job_fields/job_types returns 200 while /job_fields/business_units, /job_fields/callbacks, /job_fields/callback and bare /job_fields are all HTML 404. Ticking Callback on a job adds no key to its API record; a control experiment that set Job Type and Callback on the same job saw only job_type appear, which rules out 'the write never saved' as the explanation.",
+    handling:
+      "Do not offer callback tracking or business-unit segmentation from this API and do not build a filter on them - ?callback=true, ?callback[]=true and ?is_callback=true are accepted and ignored, returning the whole unfiltered list, which reads as a confident 'no callbacks found' (see ignored-filter-may-be-a-wrong-name). hcp_export_csv will not rescue it either: that export is built from these same job records, so the column is absent there too. Say the field is not on this surface and name where it is - the job's Job Fields section in the dashboard, and the dashboard's own job export, whose Callback column does carry it. If a pro needs callbacks visible to the API, a tag on the job is the usual workaround; ask before assuming one is already in use.",
+    kind: "shape",
+  },
+  {
     id: "job-times-are-utc",
     tags: [
       "timezone",
