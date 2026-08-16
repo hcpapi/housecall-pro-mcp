@@ -88,6 +88,34 @@ const EQUIPMENT_ON_A_JOB =
   "and the download URL is a working link to the plate); a serial or model written into the line items; or asking " +
   'the technician on site. Topic "equipment-not-on-public-api" in hcp_api_notes has it.';
 
+/**
+ * Rides on the estimate list because that is where the wrong answer starts.
+ *
+ * Asked whether a sent estimate had been viewed, an agent reads this list, sees
+ * work_status and a null approval_status, and reports that the customer has not
+ * looked at it — or that Housecall Pro does not track opens at all. Both are
+ * false, and both are reached from a perfectly successful call, so no refusal
+ * or error fires to correct them. The pointer has to ride the 200.
+ */
+const VIEWS_NOT_IN_THIS_PAYLOAD =
+  "Nothing here says whether the customer OPENED or CLICKED an estimate. work_status is our " +
+  "side of the job and approval_status only moves when they answer, so neither is evidence " +
+  "about viewing and an unanswered estimate is not an unopened one. Housecall Pro does track " +
+  'opens, just not on this API. Topic "viewed" in hcp_api_notes has where it lives.';
+
+/**
+ * Job Type is the only Job Field this API returns, and the two it omits are
+ * both things a pro asks about by name. Neither absence announces itself: the
+ * job payload simply has no such key, and the filters are accepted and ignored,
+ * so `?callback=true` answers with the whole unfiltered list and reads as "no
+ * callbacks". A pointer on the successful read is the only place to catch it.
+ */
+const JOB_FIELDS_NOT_HERE =
+  " Job Type is the only Job Field on this API. Callback and Business Unit are real fields in " +
+  "Housecall Pro and configured on this account, but neither is on the job record here and " +
+  "neither can be filtered on - ?callback=true is accepted, ignored, and returns everything. " +
+  'Do not report either as absent from the business. Topic "callback" in hcp_api_notes has it.';
+
 const EQUIPMENT_ON_A_CUSTOMER =
   "No equipment record comes back with a customer - Housecall Pro does not expose one. Reach the unit through this " +
   "customer's jobs instead: a nameplate photo on a job's attachments (hcp_get_job with include_attachments) is a " +
@@ -1217,9 +1245,9 @@ export function registerTools(
                 const n = countAttachments(filtering ? rows : (items as any[]));
                 return `${MONEY_NOTE} ${statusNote}${zoneNote} ${n} attachment(s) on this page. ${
                   n === 0 ? NO_ATTACHMENTS_HERE : ATTACHMENT_NOTE
-                }${employeeNote}${empty}`;
+                }${employeeNote}${empty}${JOB_FIELDS_NOT_HERE}`;
               })()
-            : `${MONEY_NOTE} ${statusNote}${zoneNote}${employeeNote}${empty}`,
+            : `${MONEY_NOTE} ${statusNote}${zoneNote}${employeeNote}${empty}${JOB_FIELDS_NOT_HERE}`,
         );
       } catch (e) {
         return errOut(e);
@@ -1590,7 +1618,7 @@ export function registerTools(
           has_more: typeof total_pages === "number" ? (page ?? 1) < total_pages : undefined,
           page: page ?? 1,
           estimates: items.map(trimEstimate),
-        }, MONEY_NOTE);
+        }, `${MONEY_NOTE}\n\n${VIEWS_NOT_IN_THIS_PAYLOAD}`);
       } catch (e) {
         return errOut(e);
       }
