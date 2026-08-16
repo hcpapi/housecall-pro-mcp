@@ -3,6 +3,35 @@
 Release notes live on [GitHub Releases](https://github.com/hcpapi/housecall-pro-mcp/releases);
 this file is the summary per version.
 
+## 1.18.0 — 2026-08-16
+
+**"Has the customer opened my estimate yet?" no longer gets a wrong answer.**
+Housecall Pro tracks whether a customer opened or clicked an estimate — sent,
+delivered, link clicked, opened, each with a time and a count — but keeps it on
+the activity feed, which no API key of any scope can read. Asked that question,
+an agent would read the estimate list, see an unanswered `approval_status`, and
+report that the customer had not looked at it. That is a confident wrong answer
+about a live quote, and this release removes both halves of it: a new note says
+the tracking exists and names where it lives, and the estimate listing now says
+outright that nothing in its payload is evidence about viewing. An unanswered
+estimate is not an unopened one.
+
+Two more gaps in the same shape are now documented rather than guessed at.
+**Callback and Business Unit** are real Job Fields, configured on accounts and
+absent from this API in every spelling — and their filters are accepted and
+silently ignored, so `?callback=true` returns the whole list and reads as "no
+callbacks found". **Estimate view receipts** read through a customer-scoped
+activity view are truncated by the sending estimate's own rows, so finding no
+"clicked" line there means it is not in that window, never that it was not
+clicked.
+
+The pointers ride on successful reads, which is deliberate. A refusal already
+corrects a bad call; these correct a *good* one whose payload simply does not
+contain what was asked, and measurement across repeated runs showed a warning
+delivered in the response the model is already reading changes its answer where
+the same words in the connect-time instructions and the tool description did
+not.
+
 ## 1.17.0 — 2026-08-15
 
 **Which jobs came in through online booking is now one call.** Every job row
