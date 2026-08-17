@@ -64,6 +64,15 @@ export const API_NOTES: ApiNote[] = [
     kind: "silent",
   },
   {
+    id: "pipeline-empty-until-configured",
+    tags: ["pipeline", "status", "stage", "kanban", "empty", "workflow"],
+    what:
+      "The /pipeline/statuses routes are real, but an account that has never set up pipeline stages in Housecall Pro answers 200 with an empty statuses list for job, lead and estimate alike. The empty answer is not a permissions problem, a wrong parameter or an outage - the resource_type parameter is validated properly and returns a named error when it is wrong, so an empty list means the account simply has no stages. Moving a record needs a status_id, and there are none to move it to until stages exist.",
+    handling:
+      "Read an empty statuses list as 'this account has not configured a pipeline', and say that. Do not report the pipeline as unavailable, the call as failed, or the records as having no stage - those are three different claims and only the first is true. One account having no stages says nothing about another.",
+    kind: "shape",
+  },
+  {
     id: "expand-only-attachments",
     tags: ["expand", "attachments", "equipment", "line items", "invoices", "nested"],
     what:
@@ -588,6 +597,12 @@ export const PHANTOM_ROUTES: PhantomRoute[] = [
     documented: "GET /webhooks/subscription",
     reality: "Absent.",
     tags: ["webhook", "subscription"],
+  },
+  {
+    documented: "GET /employees/{id}",
+    reality:
+      "Absent. There is no employee detail route - an id that GET /employees returned a moment earlier serves an HTML 404. Read the row from the listing, which already carries the whole record.",
+    tags: ["employee", "technician", "detail", "get"],
   },
 ];
 
