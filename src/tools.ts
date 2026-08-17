@@ -35,8 +35,24 @@ import {
   type SurfaceOptions,
 } from "./toolsets.js";
 import { unknownParameterRefusal } from "./params.js";
+import { outputSchemaFor } from "./output-schemas.js";
 
-/** Serialize a result for the model, with an optional note about data quirks. */
+/**
+ * Serialize a result for the model, with an optional note about data quirks.
+ *
+ * Every result also goes back as `structuredContent`, not only as text. The
+ * text block stays exactly as it was, because it is what a model reads and
+ * because the spec asks for it on backwards-compatibility grounds - but a
+ * consumer that wants the data should not have to parse prose to reach it. The
+ * `hcp` CLI was doing exactly that: scanning for a balanced bracket to get past
+ * a `NOTE:` prefix and a possible update notice, to recover an object this
+ * function had a moment earlier.
+ *
+ * `structuredContent` must be a JSON object, so a bare array or scalar is
+ * wrapped under `result`. Nothing in the current surface returns one, but a
+ * future tool that did would otherwise fail validation at the transport rather
+ * than here, where the reason is visible.
+ */
 function out(result: unknown, note?: string) {
   let text =
     (note ? `NOTE: ${note}\n\n` : "") + JSON.stringify(result, null, 2);
@@ -45,7 +61,14 @@ function out(result: unknown, note?: string) {
   // the only place a user would actually see it.
   const updateNotice = versionCheck.consumeNotice();
   if (updateNotice) text += `\n\n${updateNotice}`;
-  return { content: [{ type: "text" as const, text }] };
+
+  const isPlainObject =
+    typeof result === "object" && result !== null && !Array.isArray(result);
+  const structuredContent = (
+    isPlainObject ? result : { result }
+  ) as Record<string, unknown>;
+
+  return { content: [{ type: "text" as const, text }], structuredContent };
 }
 
 /**
@@ -840,6 +863,11 @@ export function makeToolRegistrar(server: McpServer, opts: SurfaceOptions) {
     const spec = TOOL_SPECS[name];
     const annotations = spec ? annotationsFor(name, spec) : undefined;
     const meta = TOOL_META[name];
+    // Declared for the tools whose shape is modelled; absent for the rest,
+    // which still return structuredContent. Declaring one obliges every
+    // success path of that tool to satisfy it, so the table is deliberately
+    // grown rather than guessed at wholesale.
+    const outputSchema = outputSchemaFor(name);
 
     // `registerTool` is the current SDK entry point; every `server.tool`
     // overload is marked deprecated. It is also the only one that carries
@@ -853,6 +881,7 @@ export function makeToolRegistrar(server: McpServer, opts: SurfaceOptions) {
           {
             description,
             inputSchema: schema,
+            ...(outputSchema ? { outputSchema } : {}),
             ...(annotations ? { annotations } : {}),
             ...(meta ? { _meta: meta } : {}),
           },

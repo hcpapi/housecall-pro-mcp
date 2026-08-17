@@ -55,6 +55,24 @@ Tool registration moves from the deprecated `server.tool` to `registerTool`,
 which is the only entry point carrying the metadata a tool needs to name the app
 that renders it.
 
+**Results come back as structured data, not only as text.** Every tool now
+returns `structuredContent` alongside the text block it always returned, so a
+client that wants the records no longer has to parse prose to reach them. The
+text is unchanged, byte for byte.
+
+Nine of those tools go further and declare an **output schema**, so a client
+reading `tools/list` can see the field names, their types and the nesting
+without calling anything: the three paginated listings, the three that answer in
+their own envelope, and the three that return a bare array. Every field is
+nullish and every object passes unknown keys through — a field Housecall Pro
+adds next month must not take a tool down.
+
+The tools that hand back the upstream record unchanged — `hcp_get_job`,
+`hcp_get_customer`, `hcp_get_customer_address`, `hcp_get_invoice` — deliberately
+declare nothing. Modelling those means owning Housecall Pro's own schema, and a
+schema describing fields a tool does not send validates perfectly while telling
+whoever reads it something untrue.
+
 ## 1.18.0 — 2026-08-16
 
 **"Has the customer opened my estimate yet?" no longer gets a wrong answer.**

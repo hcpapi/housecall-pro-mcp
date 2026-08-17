@@ -399,6 +399,13 @@ customer, without having to infer it from the name. `hcp_dispatch_job` and the
 estimate approve and decline tools are marked as possibly notifying the
 customer, because they are.
 
+Every tool returns its result as structured data as well as text, so a client
+that wants the records does not have to parse them out of prose. The listings
+also declare an output schema, which means the field names, their types and the
+nesting are readable from `tools/list` before anything is called. Tools that
+hand back a Housecall Pro record unchanged declare no schema, deliberately —
+describing fields we do not control would go stale without anyone noticing.
+
 No tool here sends an email, a text or an estimate on your behalf. Drafting an
 estimate leaves it sitting as a draft, and sending it stays a deliberate action
 you take inside Housecall Pro.

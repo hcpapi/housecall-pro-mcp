@@ -329,6 +329,8 @@ export function decode(result: any): Decoded {
 
   if (result?.isError) return { ok: false, text };
 
+  // The note is commentary about the data rather than part of it, so it stays
+  // in the text block and is lifted off here whichever way the value arrives.
   let body = text;
   let note: string | undefined;
   const noteMatch = /^NOTE: ([\s\S]*?)\n\n/.exec(body);
@@ -337,9 +339,21 @@ export function decode(result: any): Decoded {
     body = body.slice(noteMatch[0].length);
   }
 
+  // The data comes back as structured content, so it is read rather than
+  // recovered. `out` wraps a bare array or scalar under `result`; unwrap it so
+  // the caller sees what the tool actually returned.
+  const structured = result?.structuredContent;
+  if (structured && typeof structured === "object") {
+    const keys = Object.keys(structured);
+    const value = keys.length === 1 && keys[0] === "result" ? structured.result : structured;
+    return { ok: true, note, value, text: body };
+  }
+
+  // Fallback for a result that carries no structured content: the report
+  // renderer hands back a document, and an embedder standing in its own server
+  // may return whatever it likes. A failure to parse is a plain-text result,
+  // not an error.
   const sliced = sliceJson(body);
-  // Not every result is JSON - the report renderer hands back a document - so a
-  // failure to parse is a plain-text result, not an error.
   if (!sliced) return { ok: true, note, text: body };
   return { ok: true, note, value: sliced.value, text: body };
 }
