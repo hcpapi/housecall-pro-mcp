@@ -593,7 +593,7 @@ export async function main(argv: string[]): Promise<number> {
   // Strip the command words and the CLI's own flags; everything else is the
   // tool's business. `--toolsets=` is matched by prefix because it carries a value.
   const rest = argv.filter(
-    (a) => !OUTPUT_FLAGS.has(a) && !a.startsWith("--toolsets="),
+    (a) => !OUTPUT_FLAGS.has(a) && !a.startsWith("--toolsets=") && !a.startsWith("--tools="),
   );
   const commandWords = words.slice(0, consumed);
   const toolTokens = rest.filter((a) => !commandWords.includes(a));

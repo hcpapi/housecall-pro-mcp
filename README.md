@@ -337,16 +337,31 @@ tools that matter. So the surface is selectable.
 ```bash
 # Only what a reporting session needs, and nothing that can change anything
 npx -y housecall-pro-mcp --read-only --toolsets=reports,invoices,customers
+
+# A group, plus the one tool from elsewhere this session actually needs
+npx -y housecall-pro-mcp --toolsets=reports --tools=hcp_list_jobs
+
+# Exactly these two tools and nothing else
+npx -y housecall-pro-mcp --toolsets=none --tools=hcp_list_jobs,hcp_get_company
 ```
 
 | Option | Effect |
 |---|---|
 | `--read-only` | Registers no tool that can change anything. Also `HCP_READ_ONLY=1` |
 | `--toolsets=a,b` | Registers only these groups. Also `HCP_TOOLSETS` |
+| `--tools=a,b` | Registers these individual tools as well, by name. Also `HCP_TOOLS` |
 | `--help` | Lists the groups and exits |
 
 Groups: `company`, `customers`, `jobs`, `estimates`, `invoices`, `pricebook`,
-`schedule`, `reports`, `admin`. Also `all`, and `default` for the default set.
+`schedule`, `reports`, `admin`. Also `all`, `default` for the default set, and
+`none` for no group at all.
+
+`--tools` is additive to `--toolsets`, so it adds the one tool a group does not
+carry without pulling in the group. Naming tools with no `--toolsets` gives you
+those tools and nothing else. A name that is not a real tool stops the server
+with the near miss printed, rather than starting with a surface quietly missing
+what you asked for. `--read-only` still wins: naming a write tool does not
+register it.
 
 `admin` is tag, job-type and price-book structure **maintenance** - the writes
 that reshape those registries. It is **not** in the default set, because a
