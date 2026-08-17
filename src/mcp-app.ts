@@ -7,11 +7,11 @@
  * tell the assistant to write a file and hand over a path, or to re-present the
  * HTML as an artifact, which is a manual step in the middle of an answer.
  *
- * MCP Apps (SEP-1865, final 2026-01-26) is the standard way to skip that: a tool
- * points at a `ui://` resource, and a supporting host renders it inline in the
- * conversation inside a sandboxed iframe. The renderer already satisfies the
- * extension's restrictive default CSP (`default-src 'none'`) by construction,
- * because it was written to make no request in the first place.
+ * MCP Apps (SEP-1865) is the standard way to skip that: a tool points at a
+ * `ui://` resource, and a supporting host renders it inline in the conversation
+ * inside a sandboxed iframe. The renderer already satisfies the extension's
+ * restrictive default CSP (`default-src 'none'`) by construction, because it was
+ * written to make no request in the first place.
  *
  * This module holds only the wiring - the URI, the mime type, the capability,
  * and the resource. The document itself is `reportAppTemplate`, built from the
