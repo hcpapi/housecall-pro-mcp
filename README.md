@@ -76,6 +76,50 @@ an error.
 **Never trust a 2xx on a Housecall Pro write.** Read the record back. Several
 routes answer 200 without changing anything, which is why the rows above exist.
 
+## The `hcp` command line
+
+The same package installs `hcp`, which reaches the same Housecall Pro surface
+from a terminal. It is the same code — every command is one of the tools below,
+with the same conversions, the same filters and the same refusals.
+
+It exists because an MCP server only runs while an assistant is in the room.
+A scheduled task that writes an aging report every Monday morning is not
+something an MCP client can do.
+
+```bash
+npm install -g housecall-pro-mcp     # or run it once with: npx -p housecall-pro-mcp hcp
+export HCP_API_KEY=your-api-key-here
+
+hcp list jobs --work-status completed --page-size 20
+hcp jobs list --page-size 20                    # the same command, read either way round
+hcp get customer cus_1a2b3c
+hcp search customers "smith"
+hcp list invoices --csv > unpaid.csv
+```
+
+Windows, macOS and Linux, wherever Node 18+ runs.
+
+**Output.** A table sized to your terminal by default, `--json` for the full
+records, `--csv` for a spreadsheet or a scheduled export. Data goes to stdout and
+commentary to stderr, so a redirect gets the data and nothing else.
+
+**Before you change anything.** `--dry-run` prints exactly what a command would
+send and sends nothing. `--read-only` refuses any command that could change your
+account, and says which switch stopped it.
+
+**Finding your way around.** `hcp` on its own lists the commands by group.
+`hcp commands` prints them one per line, and `hcp commands --json` gives the
+whole table, including which ones write. `hcp <command> --describe` prints that
+command's parameters without running it.
+
+```bash
+hcp create customer --first-name Alex --last-name Rivera --dry-run
+hcp list jobs --describe
+```
+
+Every switch below that applies to the server applies here too, including
+`--toolsets`.
+
 ## Documented routes that do not exist
 
 Housecall Pro's published documentation describes these. They are not there. An
@@ -95,6 +139,7 @@ integration built from the docs alone ships broken code paths for each one.
 | `PUT /jobs/{id}/lock` | The verb is absent, not the route: `POST /jobs/{id}/lock` locks one job. The bulk `POST /jobs/lock` also exists and keys on `starting_at` rather than a list of job ids. |
 | `POST /api/price_book/services` | Absent. Materials and categories create normally. |
 | `GET /webhooks/subscription` | Absent. |
+| `GET /employees/{id}` | Absent. There is no employee detail route — an id that `GET /employees` just returned serves an HTML 404. Read the row from the listing. |
 
 ## What you can ask
 

@@ -3,6 +3,58 @@
 Release notes live on [GitHub Releases](https://github.com/hcpapi/housecall-pro-mcp/releases);
 this file is the summary per version.
 
+## 1.19.0 — 2026-08-17
+
+**The report opens in the conversation, and there is now a command line.**
+
+Reports have always been one self-contained interactive document — everything
+inlined, no network request, works offline. Getting one in front of you was the
+awkward part: the assistant had to write a file and hand over a path, or
+re-present the HTML, which is a manual step in the middle of an answer. The
+report is now registered as an MCP App, so a client that supports them draws it
+in the conversation — still sortable, still filterable, rows still selectable
+back into the chat. Nothing depends on the client having it: a host that does
+not declare the extension gets exactly what it got before, byte for byte, and
+`as_file` forces the file version back on a host that claims support and then
+draws nothing.
+
+**`hcp`, a command line over the same surface.** The package now installs a
+second binary. Every command is one of the tools this server already has,
+reached through the same handlers, so a filter, a conversion or a refusal
+behaves identically whichever way you come at it.
+
+```bash
+hcp list jobs --work-status completed
+hcp list invoices --csv > aging.csv
+hcp create customer --first-name Alex --last-name Rivera --dry-run
+```
+
+It exists because an MCP server only runs while an assistant is in the room. A
+scheduled task that writes an aging report every Monday morning is not something
+an MCP client can do, and it is a large part of what an office actually wants.
+Tables by default, `--json` and `--csv` when you want the records; data on
+stdout and commentary on stderr, so a redirect gets the data and nothing else;
+`--dry-run` prints what a write would send and sends nothing; `--read-only`
+refuses anything that could change the account and names the switch that stopped
+it. Windows, macOS and Linux.
+
+Commands derive from the tool names rather than being listed by hand, in both
+`hcp list jobs` and `hcp jobs list` order, so nothing can be reachable from one
+front-end and missing from the other.
+
+Two things in the report app were found by running it rather than reading it. An
+app measured its own size synchronously and reported a width of zero, because an
+iframe handed a fresh document has no width for a frame or two — and at zero
+width the height comes back several thousand pixels, so a host sizing itself on
+that draws an unusable report. It now measures after layout. And it no longer
+measures only inside `requestAnimationFrame`: a document in a hidden or
+backgrounded tab is never composited, its frame callbacks never run, and a
+report rendered off-screen would have gone on never telling the host anything.
+
+Tool registration moves from the deprecated `server.tool` to `registerTool`,
+which is the only entry point carrying the metadata a tool needs to name the app
+that renders it.
+
 ## 1.18.0 — 2026-08-16
 
 **"Has the customer opened my estimate yet?" no longer gets a wrong answer.**
