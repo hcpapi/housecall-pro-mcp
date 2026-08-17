@@ -73,6 +73,21 @@ declare nothing. Modelling those means owning Housecall Pro's own schema, and a
 schema describing fields a tool does not send validates perfectly while telling
 whoever reads it something untrue.
 
+
+**A registry listing no longer reads as the whole account.** Asked how many
+callbacks the business had last month, an assistant would list the job types,
+tags and lead sources, find nothing called a callback, and answer that Housecall
+Pro does not track them. It does — Callback is a first-class Job Field that sits
+beside Job Type, drives the dashboard's callback-rate reporting, and simply is
+not on this API in any spelling. `hcp_list_job_types`, `hcp_list_tags` and
+`hcp_list_lead_sources` now say so on a successful read: what is configured here
+is not everything Housecall Pro tracks, and not finding a category in the list is
+not evidence the business does not track it.
+
+The guidance was already in `hcp_api_notes`. The model was not going to look —
+which is the whole lesson: a pointer has to ride the response that is actually
+received.
+
 ## 1.18.0 — 2026-08-16
 
 **"Has the customer opened my estimate yet?" no longer gets a wrong answer.**

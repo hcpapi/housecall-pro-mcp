@@ -140,6 +140,28 @@ const JOB_FIELDS_NOT_HERE =
   "neither can be filtered on - ?callback=true is accepted, ignored, and returns everything. " +
   'Do not report either as absent from the business. Topic "callback" in hcp_api_notes has it.';
 
+/**
+ * Why a registry listing carries a caveat about things that are not in it.
+ *
+ * Asked whether the business tracks some category, a client reaches for these
+ * three listings, reads back what IS configured, and concludes the rest is not
+ * tracked. That inference is wrong and it is confident: Callback and Business
+ * Unit are real Job Fields, configured on accounts, and they appear in none of
+ * these registries and nowhere on this API. Measured 2026-08-17 — asked how
+ * many callbacks last month, the model listed job types, tags and lead sources
+ * and answered "callbacks isn't a category Housecall Pro tracks".
+ *
+ * The pointer rides the successful read because that is the only place it gets
+ * seen. The same guidance has been in hcp_api_notes the whole time and the
+ * model does not go and look.
+ */
+const REGISTRY_IS_NOT_THE_WHOLE_ACCOUNT =
+  " This is what is configured in this registry, not everything Housecall Pro tracks. Callback and " +
+  "Business Unit are real Job Fields in Housecall Pro that appear in no registry here and nowhere on " +
+  "this API. Not finding a category in this list is not evidence the business does not track it - say " +
+  'the field is not on this surface rather than that it does not exist. Topic "callback" in ' +
+  "hcp_api_notes has where it does live.";
+
 const EQUIPMENT_ON_A_CUSTOMER =
   "No equipment record comes back with a customer - Housecall Pro does not expose one. Reach the unit through this " +
   "customer's jobs instead: a nameplate photo on a job's attachments (hcp_get_job with include_attachments) is a " +
@@ -1717,8 +1739,9 @@ export function registerTools(
         return out(
           items,
           items.length === 0
-            ? "No tags on this account yet, which is normal, not a failure. Add one with hcp_create_tag."
-            : undefined,
+            ? "No tags on this account yet, which is normal, not a failure. Add one with hcp_create_tag." +
+              REGISTRY_IS_NOT_THE_WHOLE_ACCOUNT
+            : REGISTRY_IS_NOT_THE_WHOLE_ACCOUNT.trim(),
         );
       } catch (e) {
         return errOut(e);
@@ -3359,8 +3382,9 @@ export function registerTools(
         return out(
           items,
           items.length === 0
-            ? "No job types are configured on this account, which is an ordinary state and not an error."
-            : undefined,
+            ? "No job types are configured on this account, which is an ordinary state and not an error." +
+              REGISTRY_IS_NOT_THE_WHOLE_ACCOUNT
+            : REGISTRY_IS_NOT_THE_WHOLE_ACCOUNT.trim(),
         );
       } catch (e) {
         return errOut(e);
@@ -3375,7 +3399,7 @@ export function registerTools(
     async () => {
       try {
         const json = await hcp.request("/lead_sources", { page_size: 100 });
-        return out(hcp.normalizeList(json).items);
+        return out(hcp.normalizeList(json).items, REGISTRY_IS_NOT_THE_WHOLE_ACCOUNT.trim());
       } catch (e) {
         return errOut(e);
       }
