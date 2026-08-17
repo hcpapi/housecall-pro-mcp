@@ -138,7 +138,9 @@ const JOB_FIELDS_NOT_HERE =
   " Job Type is the only Job Field on this API. Callback and Business Unit are real fields in " +
   "Housecall Pro and configured on this account, but neither is on the job record here and " +
   "neither can be filtered on - ?callback=true is accepted, ignored, and returns everything. " +
-  'Do not report either as absent from the business. Topic "callback" in hcp_api_notes has it.';
+  "Do not report either as absent from the business: both live in the job's Job Fields section in " +
+  "the Housecall Pro dashboard, and the dashboard's own job export carries a Callback column. " +
+  'Topic "callback" in hcp_api_notes has the rest.';
 
 /**
  * Why a registry listing carries a caveat about things that are not in it.

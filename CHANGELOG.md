@@ -88,6 +88,18 @@ The guidance was already in `hcp_api_notes`. The model was not going to look —
 which is the whole lesson: a pointer has to ride the response that is actually
 received.
 
+**A note that answers beats a note that defers.** `JOB_FIELDS_NOT_HERE` told a
+client that Callback and Business Unit are real fields absent from this API, then
+sent it to `hcp_api_notes` for the rest. Measured, that deferral loses: asked
+which business unit a job was booked under, the model read the caveat, did not
+follow the pointer, and could not say where the field actually lives. The note
+now names it inline — the job's Job Fields section in the dashboard, and the
+dashboard's own job export, which carries a Callback column.
+
+The effect is not subtle and it is not about length. With the caveat deferring,
+the case scored 0.67 across three runs and never consulted the notes; with it
+answering, 1.00 — on a longer note.
+
 ## 1.18.0 — 2026-08-16
 
 **"Has the customer opened my estimate yet?" no longer gets a wrong answer.**
