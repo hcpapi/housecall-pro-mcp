@@ -9,6 +9,7 @@
   },
   "files": [
     "dist",
+    "!dist/**/*.test.js",
     "README.md",
     "LICENSE",
     "llms.txt"
@@ -17,6 +18,7 @@
     "build": "tsc",
     "prepare": "npm run build",
     "start": "node dist/index.js",
+    "test": "npm run build && node --test dist/*.test.js",
     "bundle": "npm run build && mcpb validate manifest.json && mcpb pack ."
   },
   "engines": {
