@@ -1,6 +1,6 @@
 {
   "name": "housecall-pro-mcp",
-  "version": "1.18.0",
+  "version": "1.19.0",
   "mcpName": "io.github.hcpapi/housecall-pro-mcp",
   "description": "MCP server for the Housecall Pro API - connect Claude, ChatGPT, Cursor, or any MCP-compatible AI agent to your Housecall Pro account. Needs a Housecall Pro API key, which is a MAX-plan feature. Independent; not affiliated with Housecall Pro.",
   "type": "module",

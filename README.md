@@ -149,7 +149,7 @@ key reaches the whole account rather than one person's slice of it.
 
 ## Tools
 
-95 tools. Reading works with any key; writing needs a full-access one. They are
+96 tools. Reading works with any key; writing needs a full-access one. They are
 grouped into toolsets, so an install can register only the groups it needs -
 see [Choosing which tools to register](#choosing-which-tools-to-register).
 
@@ -174,7 +174,8 @@ see [Choosing which tools to register](#choosing-which-tools-to-register).
 | `hcp_get_invoice` | One invoice in full, with payments, refunds and balance |
 | `hcp_get_job_invoices` | A single job's invoices, without walking the whole list |
 | `hcp_get_invoice_document` | A preview of the invoice page as the customer sees it |
-| `hcp_list_estimates` | Estimates with option totals |
+| `hcp_list_estimates` | Estimates with their options, approval dates and assigned employees |
+| `hcp_get_estimate` | One estimate in full |
 | `hcp_get_estimate_line_items` | Line items on an estimate option |
 | `hcp_list_leads` · `hcp_get_lead` | Unconverted enquiries, and one lead with its line items |
 | `hcp_list_events` · `hcp_get_event` | Calendar entries that are not jobs, with recurrence and attendees |

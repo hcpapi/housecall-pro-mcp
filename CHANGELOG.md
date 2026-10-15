@@ -3,6 +3,32 @@
 Release notes live on [GitHub Releases](https://github.com/hcpapi/housecall-pro-mcp/releases);
 this file is the summary per version.
 
+## 1.19.0 — 2026-10-14
+
+**Who is on an estimate, and when it was answered.** Housecall Pro added two
+fields to the estimate record this month, and both now ride every estimate
+row. `employees` is the assigned technicians as id and name, the same shape a
+job row has carried all along; an estimate that has not been assigned and
+scheduled in the app has an empty list. Each option now has
+`approval_status_updated_at`, the moment its `approval_status` last changed,
+null until the customer or the office answered. "Approved five days ago and
+still not scheduled" was computed from the option's `updated_at` before, a
+clock that moves for other reasons too; now it reads from the field that means
+it. `lead_source` rides along as well, as it has on jobs since 1.17.0.
+
+**`hcp_get_estimate` reads one estimate in full.** Every option, the assigned
+employees, the customer, the address, and the schedule with the same
+account-zone rendering a job record gets. Line items stay a separate read per
+option, as before.
+
+**The estimates CSV no longer says `[object Object]`.** The options column was
+a list of records joined as strings, which is what JavaScript prints for one.
+Lists of records now render field by field (`id=est_... name=Option 1
+approval_status=approved total_dollars=1500`), in every export, which also puts
+a job's employees into the jobs export readably.
+
+Requested in hcpapi/housecall-pro-mcp#2.
+
 ## 1.18.0 — 2026-08-16
 
 **"Has the customer opened my estimate yet?" no longer gets a wrong answer.**

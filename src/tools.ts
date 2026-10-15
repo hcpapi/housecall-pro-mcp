@@ -204,14 +204,7 @@ function trimCustomer(c: any) {
 }
 
 function trimJob(j: any, timeZone: string | null = null) {
-  const employees = Array.isArray(j?.assigned_employees)
-    ? j.assigned_employees
-        .map((e: any) => ({
-          id: e?.id,
-          name: `${e?.first_name ?? ""} ${e?.last_name ?? ""}`.trim() || undefined,
-        }))
-        .filter((e: any) => e.id || e.name)
-    : [];
+  const employees = trimEmployees(j?.assigned_employees);
   return {
     id: j?.id,
     // Deleted jobs still appear in list responses; callers filter on this.
@@ -433,6 +426,23 @@ function trimAddress(a: any) {
   };
 }
 
+/**
+ * The employees on a record, as id plus a display name. Jobs and estimates
+ * both carry `assigned_employees` upstream, each entry a whole employee record
+ * (email, mobile, colour, avatar, the permission matrix), and the id and name
+ * are the two parts a caller ever acts on.
+ */
+function trimEmployees(list: unknown): { id: unknown; name: string | undefined }[] {
+  return Array.isArray(list)
+    ? list
+        .map((e: any) => ({
+          id: e?.id,
+          name: `${e?.first_name ?? ""} ${e?.last_name ?? ""}`.trim() || undefined,
+        }))
+        .filter((e) => e.id || e.name)
+    : [];
+}
+
 function trimEstimate(e: any) {
   const options = Array.isArray(e?.options) ? e.options : [];
   return {
@@ -440,15 +450,23 @@ function trimEstimate(e: any) {
     estimate_number: e?.estimate_number,
     work_status: e?.work_status,
     created_at: e?.created_at,
+    updated_at: e?.updated_at ?? undefined,
     customer_id: e?.customer?.id,
     customer_name: e?.customer
       ? `${e.customer.first_name ?? ""} ${e.customer.last_name ?? ""}`.trim() || undefined
       : undefined,
+    // Same field, same shape as on a job row. Housecall Pro added
+    // assigned_employees to the estimate record in 2026-10; an estimate that
+    // has not been assigned and scheduled in the app comes back with none.
+    employees: trimEmployees(e?.assigned_employees),
+    lead_source: e?.lead_source ?? undefined,
     option_count: options.length || undefined,
     // The option ids here are what the approve/decline tools take, and the
-    // per-option approval_status is what a follow-up queue filters on;
-    // updated_at is when that status last moved, which is what "approved
-    // five days ago and still not scheduled" is computed from.
+    // per-option approval_status is what a follow-up queue filters on.
+    // approval_status_updated_at is when that status last changed (null until
+    // the option has been approved or declined), which is what "approved five
+    // days ago and still not scheduled" is computed from; updated_at is the
+    // option record's own last edit, which moves for other reasons too.
     options: options.length
       ? options.map((o: any) => {
           // The pitch the shop sent with the option; a follow-up that
@@ -459,6 +477,7 @@ function trimEstimate(e: any) {
             id: o?.id,
             name: o?.name || undefined,
             approval_status: o?.approval_status ?? null,
+            approval_status_updated_at: o?.approval_status_updated_at ?? null,
             updated_at: o?.updated_at ?? undefined,
             total_dollars: centsToDollars(o?.total_amount ?? o?.amount),
             message_from_pro: msg ? (msg.length > 300 ? `${msg.slice(0, 300)}…` : msg) : undefined,
@@ -473,6 +492,27 @@ function trimEstimate(e: any) {
 function csvEscape(v: unknown): string {
   const s = v === null || v === undefined ? "" : String(v);
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+/**
+ * One CSV cell for a value that is a list. Strings and numbers join as they
+ * are; objects are rendered field by field, because String(object) is
+ * "[object Object]" and a column of those is what the estimates export shipped
+ * for its options until 1.19.0. Nullish fields are left out of the rendering.
+ */
+function csvCell(v: unknown): unknown {
+  if (!Array.isArray(v)) return v;
+  return v
+    .map((item) => {
+      if (item === null || item === undefined) return "";
+      if (typeof item !== "object") return String(item);
+      return Object.entries(item as Record<string, unknown>)
+        .filter(([, x]) => x !== null && x !== undefined && x !== "")
+        .map(([k, x]) => `${k}=${typeof x === "object" ? JSON.stringify(x) : String(x)}`)
+        .join(" ");
+    })
+    .filter((x) => x !== "")
+    .join("; ");
 }
 
 function toCsv(rows: Record<string, unknown>[]): string {
@@ -1651,6 +1691,45 @@ export function registerTools(
           page: page ?? 1,
           estimates: items.map(trimEstimate),
         }, `${MONEY_NOTE}\n\n${VIEWS_NOT_IN_THIS_PAYLOAD}`);
+      } catch (e) {
+        return errOut(e);
+      }
+    },
+  );
+
+  tool(
+    "hcp_get_estimate",
+    "Get one estimate's full record by estimate id (csr_...): every option with its approval status and " +
+      "when that status last changed, the assigned employees, the schedule, the customer and the address. " +
+      "Line items are a separate read - hcp_get_estimate_line_items, per option.",
+    {
+      estimate_id: z.string().describe("Estimate id (csr_...) from hcp_list_estimates"),
+    },
+    async ({ estimate_id }) => {
+      try {
+        const json = await hcp.request(`/estimates/${estimate_id}`);
+        // The record passes through as Housecall Pro sends it, which means UTC
+        // and money in cents, so the same two notes a job record carries.
+        const timeZone = await hcp.accountTimeZone();
+        const start = localTime((json as any)?.schedule?.scheduled_start, timeZone);
+        const end = localTime((json as any)?.schedule?.scheduled_end, timeZone);
+        const scheduleLocal =
+          start || end
+            ? {
+                schedule_local: {
+                  time_zone: timeZone,
+                  ...(start ? { scheduled_start_local: start } : {}),
+                  ...(end ? { scheduled_end_local: end } : {}),
+                },
+              }
+            : {};
+        const zone = start || end
+          ? ` Timestamps on the record are UTC; schedule_local carries the same visit times in the account's zone (${timeZone}) - quote those to a person.`
+          : ` Timestamps on the record are UTC. Convert before quoting a time to a person; the account's zone is on hcp_get_company.`;
+        return out(
+          { ...(json as any), ...scheduleLocal },
+          `${MONEY_NOTE}${zone} Each option's approval_status_updated_at is when its approval_status last changed, null until the customer or the office answered.\n\n${VIEWS_NOT_IN_THIS_PAYLOAD}`,
+        );
       } catch (e) {
         return errOut(e);
       }
@@ -4448,13 +4527,17 @@ export function registerTools(
         };
         const prepRow = (item: unknown) => {
           const trimmed = trimmers[entity](item);
-          if (entity === "invoices" || entity === "estimates") {
-            // flatten arrays for CSV
-            for (const [k, v] of Object.entries(trimmed)) {
-              if (Array.isArray(v)) trimmed[k] = v.join("; ");
-            }
+          // Flatten every list for CSV. Lists of records (an estimate's
+          // options, a job's employees) render field by field rather than as
+          // "[object Object]".
+          for (const [k, v] of Object.entries(trimmed)) {
+            if (!Array.isArray(v)) continue;
+            // An option's pitch is a paragraph of terms; in a spreadsheet cell
+            // it buries the status and total it sits beside.
+            trimmed[k] = csvCell(
+              k === "options" ? v.map(({ message_from_pro, ...o }: any) => o) : v,
+            );
           }
-          if (Array.isArray(trimmed.tags)) trimmed.tags = (trimmed.tags as unknown[]).join("; ");
           return trimmed;
         };
         const rows: Record<string, unknown>[] = [];

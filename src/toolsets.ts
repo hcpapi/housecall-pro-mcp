@@ -199,6 +199,7 @@ export const TOOL_SPECS: Record<string, ToolSpec> = {
 
   /* ---- estimates ---- */
   hcp_list_estimates: { toolset: "estimates" },
+  hcp_get_estimate: { toolset: "estimates" },
   hcp_get_estimate_line_items: { toolset: "estimates" },
   hcp_create_estimate: { toolset: "estimates", write: true },
   hcp_add_estimate_option: { toolset: "estimates", write: true },
