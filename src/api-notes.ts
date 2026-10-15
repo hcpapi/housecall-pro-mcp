@@ -470,7 +470,7 @@ export const API_NOTES: ApiNote[] = [
     what:
       "Approving or declining an estimate option answers 200 without echoing the option's new state, so the 2xx alone is not evidence the answer was recorded.",
     handling:
-      "Read the option's approval_status back with hcp_list_estimates - it reads \"pro approved\" or \"pro declined\" once the answer landed - before reporting it recorded.",
+      "Read the option's approval_status back with hcp_get_estimate or hcp_list_estimates - it reads \"pro approved\" or \"pro declined\" once the answer landed, and approval_status_updated_at moves to the moment it did - before reporting it recorded.",
     kind: "silent",
   },
   {
