@@ -310,6 +310,13 @@ export interface SurfaceOptions {
   readOnly: boolean;
   toolsets: Toolset[];
   /**
+   * Individually named tools, registered on top of whatever the toolsets
+   * select. A group is the right granularity most of the time and the wrong one
+   * when a session needs exactly one tool out of `admin`; naming it directly
+   * beats taking the group and its blast radius with it.
+   */
+  tools?: string[];
+  /**
    * True when the server was started without an HCP_API_KEY. Only the tools
    * that never call Housecall Pro register, so nothing can fail on a missing
    * key at call time.
@@ -347,12 +354,27 @@ export function parseSurfaceOptions(
     argv.includes("--read-only") ||
     /^(1|true|yes)$/i.test(env.HCP_READ_ONLY ?? "");
 
-  const flag = argv.find((a) => a.startsWith("--toolsets="));
-  const raw = flag ? flag.slice("--toolsets=".length) : env.HCP_TOOLSETS;
+  // `--toolsets` and `--tools` both end in the same seven characters, so the
+  // longer name is matched first and exactly. A prefix test for "--tools="
+  // alone would never see "--toolsets=" - but one written the other way round
+  // would silently read a toolset list as a tool list.
+  const setFlag = argv.find((a) => a.startsWith("--toolsets="));
+  const rawSets = setFlag ? setFlag.slice("--toolsets=".length) : env.HCP_TOOLSETS;
 
-  if (!raw || !raw.trim()) return { readOnly, toolsets: [...DEFAULT_TOOLSETS] };
+  const toolFlag = argv.find((a) => a.startsWith("--tools="));
+  const rawTools = toolFlag ? toolFlag.slice("--tools=".length) : env.HCP_TOOLS;
 
-  const requested = raw
+  const tools = parseToolNames(rawTools);
+
+  if (!rawSets || !rawSets.trim()) {
+    // Naming individual tools and nothing else means those tools and nothing
+    // else. Adding the default groups on top would make the narrow request the
+    // one thing it cannot express.
+    const toolsets = tools.length ? [] : [...DEFAULT_TOOLSETS];
+    return { readOnly, toolsets, ...(tools.length ? { tools } : {}) };
+  }
+
+  const requested = rawSets
     .split(",")
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
@@ -364,6 +386,9 @@ export function parseSurfaceOptions(
       for (const t of TOOLSETS) chosen.add(t);
     } else if (item === "default") {
       for (const t of DEFAULT_TOOLSETS) chosen.add(t);
+    } else if (item === "none") {
+      // Explicitly empty, so `--toolsets=none --tools=a,b` is exactly a and b.
+      continue;
     } else if ((TOOLSETS as readonly string[]).includes(item)) {
       chosen.add(item as Toolset);
     } else {
@@ -374,11 +399,47 @@ export function parseSurfaceOptions(
   if (unknown.length) {
     throw new Error(
       `Unknown toolset(s): ${unknown.join(", ")}. ` +
-        `Valid names are ${TOOLSETS.join(", ")}, plus "all" and "default".`,
+        `Valid names are ${TOOLSETS.join(", ")}, plus "all", "default" and "none".`,
     );
   }
 
-  return { readOnly, toolsets: [...chosen] };
+  if (!chosen.size && !tools.length) {
+    throw new Error(
+      `--toolsets=none selects nothing, and no --tools were named. ` +
+        `A server with no tools is indistinguishable from a broken one, so this is refused rather than started.`,
+    );
+  }
+
+  return { readOnly, toolsets: [...chosen], ...(tools.length ? { tools } : {}) };
+}
+
+/**
+ * Validate an individually-named tool list.
+ *
+ * A bad name is fatal for the same reason a bad toolset name is: a typo that
+ * silently registers nothing looks exactly like the API being unreachable, and
+ * the person who made the typo is the last to suspect it.
+ */
+function parseToolNames(raw: string | undefined): string[] {
+  if (!raw || !raw.trim()) return [];
+  const requested = [...new Set(raw.split(",").map((s) => s.trim()).filter(Boolean))];
+  const known = Object.keys(TOOL_SPECS);
+  const unknown = requested.filter((t) => !TOOL_SPECS[t]);
+
+  if (unknown.length) {
+    const suggestions = unknown
+      .map((bad) => {
+        const stem = bad.replace(/^hcp_/, "");
+        const near = known.filter((k) => k.includes(stem) || stem.includes(k.replace(/^hcp_/, "")));
+        return near.length ? `${bad} (did you mean ${near.slice(0, 3).join(", ")}?)` : bad;
+      })
+      .join("; ");
+    throw new Error(
+      `Unknown tool(s) in --tools: ${suggestions}. ` +
+        `Tool names look like hcp_list_jobs; there are ${known.length} of them.`,
+    );
+  }
+  return requested;
 }
 
 /** Whether a given tool should be registered under these options. */
@@ -392,6 +453,13 @@ export function shouldRegister(name: string, opts: SurfaceOptions): boolean {
   // An unclassified tool is a bug in this table, not a reason to hide the tool.
   // Register it as a read and let the hygiene check fail the build.
   if (!spec) return true;
+  // Read-only wins over an explicit pick. Naming a tool is a strong signal, but
+  // the switch is a safety one, and a safety switch a flag can talk round is
+  // not a safety switch.
   if (opts.readOnly && spec.write) return false;
+  // Individually named tools are additive to the selected toolsets, which is
+  // how a caller adds the one thing a group does not carry without taking the
+  // whole group.
+  if (opts.tools?.includes(name)) return true;
   return opts.toolsets.includes(spec.toolset);
 }

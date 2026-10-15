@@ -41,12 +41,21 @@
       "description": "Which groups of tools to load, comma-separated: company, customers, jobs, estimates, invoices, pricebook, schedule, reports, admin. Also 'all', and 'default' for the usual set. Loading fewer makes the assistant choose better among the ones that remain. Leave as 'default' for the usual set.",
       "required": false,
       "default": "default"
+    },
+    "hcp_tools": {
+      "type": "string",
+      "title": "Individual tools",
+      "description": "Extra tool names to load on top of the toolsets, comma-separated, e.g. hcp_list_jobs. Set Toolsets to 'none' to load exactly these and nothing else. An unknown name stops the server rather than starting without it.",
+      "required": false
     }
   },
   "mcpServers": {
     "housecall-pro": {
       "command": "npx",
-      "args": ["-y", "housecall-pro-mcp"],
+      "args": [
+        "-y",
+        "housecall-pro-mcp"
+      ],
       "env": {
         "HCP_API_KEY": "${user_config.hcp_api_key}",
         "HCP_READ_ONLY": "${user_config.hcp_read_only}",

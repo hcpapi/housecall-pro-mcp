@@ -35,6 +35,12 @@
           "description": "Comma-separated groups to register: company, customers, jobs, estimates, invoices, pricebook, schedule, reports, admin. Also 'all' and 'default'. Fewer tools in context makes a client choose better among them.",
           "isRequired": false,
           "isSecret": false
+        },
+        {
+          "name": "HCP_TOOLS",
+          "description": "Comma-separated tool names to register in addition to the toolsets, e.g. hcp_list_jobs. Pair with HCP_TOOLSETS=none for exactly these tools. An unknown name stops the server rather than silently registering nothing.",
+          "isRequired": false,
+          "isSecret": false
         }
       ]
     }

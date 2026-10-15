@@ -5,6 +5,101 @@ this file is the summary per version.
 
 ## 1.19.0 — 2026-10-14
 
+**The report opens in the conversation, and there is now a command line.**
+
+Reports have always been one self-contained interactive document — everything
+inlined, no network request, works offline. Getting one in front of you was the
+awkward part: the assistant had to write a file and hand over a path, or
+re-present the HTML, which is a manual step in the middle of an answer. The
+report is now registered as an MCP App, so a client that supports them draws it
+in the conversation — still sortable, still filterable, rows still selectable
+back into the chat. Nothing depends on the client having it: a host that does
+not declare the extension gets exactly what it got before, byte for byte, and
+`as_file` forces the file version back on a host that claims support and then
+draws nothing.
+
+**`hcp`, a command line over the same surface.** The package now installs a
+second binary. Every command is one of the tools this server already has,
+reached through the same handlers, so a filter, a conversion or a refusal
+behaves identically whichever way you come at it.
+
+```bash
+hcp list jobs --work-status completed
+hcp list invoices --csv > aging.csv
+hcp create customer --first-name Alex --last-name Rivera --dry-run
+```
+
+It exists because an MCP server only runs while an assistant is in the room. A
+scheduled task that writes an aging report every Monday morning is not something
+an MCP client can do, and it is a large part of what an office actually wants.
+Tables by default, `--json` and `--csv` when you want the records; data on
+stdout and commentary on stderr, so a redirect gets the data and nothing else;
+`--dry-run` prints what a write would send and sends nothing; `--read-only`
+refuses anything that could change the account and names the switch that stopped
+it. Windows, macOS and Linux.
+
+Commands derive from the tool names rather than being listed by hand, in both
+`hcp list jobs` and `hcp jobs list` order, so nothing can be reachable from one
+front-end and missing from the other.
+
+Two things in the report app were found by running it rather than reading it. An
+app measured its own size synchronously and reported a width of zero, because an
+iframe handed a fresh document has no width for a frame or two — and at zero
+width the height comes back several thousand pixels, so a host sizing itself on
+that draws an unusable report. It now measures after layout. And it no longer
+measures only inside `requestAnimationFrame`: a document in a hidden or
+backgrounded tab is never composited, its frame callbacks never run, and a
+report rendered off-screen would have gone on never telling the host anything.
+
+Tool registration moves from the deprecated `server.tool` to `registerTool`,
+which is the only entry point carrying the metadata a tool needs to name the app
+that renders it.
+
+**Results come back as structured data, not only as text.** Every tool now
+returns `structuredContent` alongside the text block it always returned, so a
+client that wants the records no longer has to parse prose to reach them. The
+text is unchanged, byte for byte.
+
+Nine of those tools go further and declare an **output schema**, so a client
+reading `tools/list` can see the field names, their types and the nesting
+without calling anything: the three paginated listings, the three that answer in
+their own envelope, and the three that return a bare array. Every field is
+nullish and every object passes unknown keys through — a field Housecall Pro
+adds next month must not take a tool down.
+
+The tools that hand back the upstream record unchanged — `hcp_get_job`,
+`hcp_get_customer`, `hcp_get_customer_address`, `hcp_get_invoice` — deliberately
+declare nothing. Modelling those means owning Housecall Pro's own schema, and a
+schema describing fields a tool does not send validates perfectly while telling
+whoever reads it something untrue.
+
+
+**A registry listing no longer reads as the whole account.** Asked how many
+callbacks the business had last month, an assistant would list the job types,
+tags and lead sources, find nothing called a callback, and answer that Housecall
+Pro does not track them. It does — Callback is a first-class Job Field that sits
+beside Job Type, drives the dashboard's callback-rate reporting, and simply is
+not on this API in any spelling. `hcp_list_job_types`, `hcp_list_tags` and
+`hcp_list_lead_sources` now say so on a successful read: what is configured here
+is not everything Housecall Pro tracks, and not finding a category in the list is
+not evidence the business does not track it.
+
+The guidance was already in `hcp_api_notes`. The model was not going to look —
+which is the whole lesson: a pointer has to ride the response that is actually
+received.
+
+**A note that answers beats a note that defers.** `JOB_FIELDS_NOT_HERE` told a
+client that Callback and Business Unit are real fields absent from this API, then
+sent it to `hcp_api_notes` for the rest. Measured, that deferral loses: asked
+which business unit a job was booked under, the model read the caveat, did not
+follow the pointer, and could not say where the field actually lives. The note
+now names it inline — the job's Job Fields section in the dashboard, and the
+dashboard's own job export, which carries a Callback column.
+
+The effect is not subtle and it is not about length. With the caveat deferring,
+the case scored 0.67 across three runs and never consulted the notes; with it
+answering, 1.00 — on a longer note.
+
 **Who is on an estimate, and when it was answered.** Housecall Pro added two
 fields to the estimate record this month, and both now ride every estimate
 row. `employees` is the assigned technicians as id and name, the same shape a

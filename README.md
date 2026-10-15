@@ -76,6 +76,50 @@ an error.
 **Never trust a 2xx on a Housecall Pro write.** Read the record back. Several
 routes answer 200 without changing anything, which is why the rows above exist.
 
+## The `hcp` command line
+
+The same package installs `hcp`, which reaches the same Housecall Pro surface
+from a terminal. It is the same code — every command is one of the tools below,
+with the same conversions, the same filters and the same refusals.
+
+It exists because an MCP server only runs while an assistant is in the room.
+A scheduled task that writes an aging report every Monday morning is not
+something an MCP client can do.
+
+```bash
+npm install -g housecall-pro-mcp     # or run it once with: npx -p housecall-pro-mcp hcp
+export HCP_API_KEY=your-api-key-here
+
+hcp list jobs --work-status completed --page-size 20
+hcp jobs list --page-size 20                    # the same command, read either way round
+hcp get customer cus_1a2b3c
+hcp search customers "smith"
+hcp list invoices --csv > unpaid.csv
+```
+
+Windows, macOS and Linux, wherever Node 18+ runs.
+
+**Output.** A table sized to your terminal by default, `--json` for the full
+records, `--csv` for a spreadsheet or a scheduled export. Data goes to stdout and
+commentary to stderr, so a redirect gets the data and nothing else.
+
+**Before you change anything.** `--dry-run` prints exactly what a command would
+send and sends nothing. `--read-only` refuses any command that could change your
+account, and says which switch stopped it.
+
+**Finding your way around.** `hcp` on its own lists the commands by group.
+`hcp commands` prints them one per line, and `hcp commands --json` gives the
+whole table, including which ones write. `hcp <command> --describe` prints that
+command's parameters without running it.
+
+```bash
+hcp create customer --first-name Alex --last-name Rivera --dry-run
+hcp list jobs --describe
+```
+
+Every switch below that applies to the server applies here too, including
+`--toolsets`.
+
 ## Documented routes that do not exist
 
 Housecall Pro's published documentation describes these. They are not there. An
@@ -95,6 +139,7 @@ integration built from the docs alone ships broken code paths for each one.
 | `PUT /jobs/{id}/lock` | The verb is absent, not the route: `POST /jobs/{id}/lock` locks one job. The bulk `POST /jobs/lock` also exists and keys on `starting_at` rather than a list of job ids. |
 | `POST /api/price_book/services` | Absent. Materials and categories create normally. |
 | `GET /webhooks/subscription` | Absent. |
+| `GET /employees/{id}` | Absent. There is no employee detail route — an id that `GET /employees` just returned serves an HTML 404. Read the row from the listing. |
 
 ## What you can ask
 
@@ -293,16 +338,31 @@ tools that matter. So the surface is selectable.
 ```bash
 # Only what a reporting session needs, and nothing that can change anything
 npx -y housecall-pro-mcp --read-only --toolsets=reports,invoices,customers
+
+# A group, plus the one tool from elsewhere this session actually needs
+npx -y housecall-pro-mcp --toolsets=reports --tools=hcp_list_jobs
+
+# Exactly these two tools and nothing else
+npx -y housecall-pro-mcp --toolsets=none --tools=hcp_list_jobs,hcp_get_company
 ```
 
 | Option | Effect |
 |---|---|
 | `--read-only` | Registers no tool that can change anything. Also `HCP_READ_ONLY=1` |
 | `--toolsets=a,b` | Registers only these groups. Also `HCP_TOOLSETS` |
+| `--tools=a,b` | Registers these individual tools as well, by name. Also `HCP_TOOLS` |
 | `--help` | Lists the groups and exits |
 
 Groups: `company`, `customers`, `jobs`, `estimates`, `invoices`, `pricebook`,
-`schedule`, `reports`, `admin`. Also `all`, and `default` for the default set.
+`schedule`, `reports`, `admin`. Also `all`, `default` for the default set, and
+`none` for no group at all.
+
+`--tools` is additive to `--toolsets`, so it adds the one tool a group does not
+carry without pulling in the group. Naming tools with no `--toolsets` gives you
+those tools and nothing else. A name that is not a real tool stops the server
+with the near miss printed, rather than starting with a surface quietly missing
+what you asked for. `--read-only` still wins: naming a write tool does not
+register it.
 
 `admin` is tag, job-type and price-book structure **maintenance** - the writes
 that reshape those registries. It is **not** in the default set, because a
@@ -354,6 +414,13 @@ write, a write from a delete, and either from something that reaches the
 customer, without having to infer it from the name. `hcp_dispatch_job` and the
 estimate approve and decline tools are marked as possibly notifying the
 customer, because they are.
+
+Every tool returns its result as structured data as well as text, so a client
+that wants the records does not have to parse them out of prose. The listings
+also declare an output schema, which means the field names, their types and the
+nesting are readable from `tools/list` before anything is called. Tools that
+hand back a Housecall Pro record unchanged declare no schema, deliberately —
+describing fields we do not control would go stale without anyone noticing.
 
 No tool here sends an email, a text or an estimate on your behalf. Drafting an
 estimate leaves it sitting as a draft, and sending it stays a deliberate action

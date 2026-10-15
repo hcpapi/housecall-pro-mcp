@@ -35,8 +35,24 @@ import {
   type SurfaceOptions,
 } from "./toolsets.js";
 import { unknownParameterRefusal } from "./params.js";
+import { outputSchemaFor } from "./output-schemas.js";
 
-/** Serialize a result for the model, with an optional note about data quirks. */
+/**
+ * Serialize a result for the model, with an optional note about data quirks.
+ *
+ * Every result also goes back as `structuredContent`, not only as text. The
+ * text block stays exactly as it was, because it is what a model reads and
+ * because the spec asks for it on backwards-compatibility grounds - but a
+ * consumer that wants the data should not have to parse prose to reach it. The
+ * `hcp` CLI was doing exactly that: scanning for a balanced bracket to get past
+ * a `NOTE:` prefix and a possible update notice, to recover an object this
+ * function had a moment earlier.
+ *
+ * `structuredContent` must be a JSON object, so a bare array or scalar is
+ * wrapped under `result`. Nothing in the current surface returns one, but a
+ * future tool that did would otherwise fail validation at the transport rather
+ * than here, where the reason is visible.
+ */
 function out(result: unknown, note?: string) {
   let text =
     (note ? `NOTE: ${note}\n\n` : "") + JSON.stringify(result, null, 2);
@@ -45,7 +61,14 @@ function out(result: unknown, note?: string) {
   // the only place a user would actually see it.
   const updateNotice = versionCheck.consumeNotice();
   if (updateNotice) text += `\n\n${updateNotice}`;
-  return { content: [{ type: "text" as const, text }] };
+
+  const isPlainObject =
+    typeof result === "object" && result !== null && !Array.isArray(result);
+  const structuredContent = (
+    isPlainObject ? result : { result }
+  ) as Record<string, unknown>;
+
+  return { content: [{ type: "text" as const, text }], structuredContent };
 }
 
 /**
@@ -115,7 +138,31 @@ const JOB_FIELDS_NOT_HERE =
   " Job Type is the only Job Field on this API. Callback and Business Unit are real fields in " +
   "Housecall Pro and configured on this account, but neither is on the job record here and " +
   "neither can be filtered on - ?callback=true is accepted, ignored, and returns everything. " +
-  'Do not report either as absent from the business. Topic "callback" in hcp_api_notes has it.';
+  "Do not report either as absent from the business: both live in the job's Job Fields section in " +
+  "the Housecall Pro dashboard, and the dashboard's own job export carries a Callback column. " +
+  'Topic "callback" in hcp_api_notes has the rest.';
+
+/**
+ * Why a registry listing carries a caveat about things that are not in it.
+ *
+ * Asked whether the business tracks some category, a client reaches for these
+ * three listings, reads back what IS configured, and concludes the rest is not
+ * tracked. That inference is wrong and it is confident: Callback and Business
+ * Unit are real Job Fields, configured on accounts, and they appear in none of
+ * these registries and nowhere on this API. Measured 2026-08-17 — asked how
+ * many callbacks last month, the model listed job types, tags and lead sources
+ * and answered "callbacks isn't a category Housecall Pro tracks".
+ *
+ * The pointer rides the successful read because that is the only place it gets
+ * seen. The same guidance has been in hcp_api_notes the whole time and the
+ * model does not go and look.
+ */
+const REGISTRY_IS_NOT_THE_WHOLE_ACCOUNT =
+  " This is what is configured in this registry, not everything Housecall Pro tracks. Callback and " +
+  "Business Unit are real Job Fields in Housecall Pro that appear in no registry here and nowhere on " +
+  "this API. Not finding a category in this list is not evidence the business does not track it - say " +
+  'the field is not on this surface rather than that it does not exist. Topic "callback" in ' +
+  "hcp_api_notes has where it does live.";
 
 const EQUIPMENT_ON_A_CUSTOMER =
   "No equipment record comes back with a customer - Housecall Pro does not expose one. Reach the unit through this " +
@@ -880,6 +927,11 @@ export function makeToolRegistrar(server: McpServer, opts: SurfaceOptions) {
     const spec = TOOL_SPECS[name];
     const annotations = spec ? annotationsFor(name, spec) : undefined;
     const meta = TOOL_META[name];
+    // Declared for the tools whose shape is modelled; absent for the rest,
+    // which still return structuredContent. Declaring one obliges every
+    // success path of that tool to satisfy it, so the table is deliberately
+    // grown rather than guessed at wholesale.
+    const outputSchema = outputSchemaFor(name);
 
     // `registerTool` is the current SDK entry point; every `server.tool`
     // overload is marked deprecated. It is also the only one that carries
@@ -893,6 +945,7 @@ export function makeToolRegistrar(server: McpServer, opts: SurfaceOptions) {
           {
             description,
             inputSchema: schema,
+            ...(outputSchema ? { outputSchema } : {}),
             ...(annotations ? { annotations } : {}),
             ...(meta ? { _meta: meta } : {}),
           },
@@ -1767,8 +1820,9 @@ export function registerTools(
         return out(
           items,
           items.length === 0
-            ? "No tags on this account yet, which is normal, not a failure. Add one with hcp_create_tag."
-            : undefined,
+            ? "No tags on this account yet, which is normal, not a failure. Add one with hcp_create_tag." +
+              REGISTRY_IS_NOT_THE_WHOLE_ACCOUNT
+            : REGISTRY_IS_NOT_THE_WHOLE_ACCOUNT.trim(),
         );
       } catch (e) {
         return errOut(e);
@@ -3409,8 +3463,9 @@ export function registerTools(
         return out(
           items,
           items.length === 0
-            ? "No job types are configured on this account, which is an ordinary state and not an error."
-            : undefined,
+            ? "No job types are configured on this account, which is an ordinary state and not an error." +
+              REGISTRY_IS_NOT_THE_WHOLE_ACCOUNT
+            : REGISTRY_IS_NOT_THE_WHOLE_ACCOUNT.trim(),
         );
       } catch (e) {
         return errOut(e);
@@ -3425,7 +3480,7 @@ export function registerTools(
     async () => {
       try {
         const json = await hcp.request("/lead_sources", { page_size: 100 });
-        return out(hcp.normalizeList(json).items);
+        return out(hcp.normalizeList(json).items, REGISTRY_IS_NOT_THE_WHOLE_ACCOUNT.trim());
       } catch (e) {
         return errOut(e);
       }
