@@ -149,7 +149,7 @@ const JOB_FIELDS_NOT_HERE =
  * three listings, reads back what IS configured, and concludes the rest is not
  * tracked. That inference is wrong and it is confident: Callback and Business
  * Unit are real Job Fields, configured on accounts, and they appear in none of
- * these registries and nowhere on this API. Measured 2026-08-17 — asked how
+ * these registries and nowhere on this API. Measured: asked how
  * many callbacks last month, the model listed job types, tags and lead sources
  * and answered "callbacks isn't a category Housecall Pro tracks".
  *
