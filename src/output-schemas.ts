@@ -9,7 +9,7 @@
  *
  * So the rule here is: **promise the shape, never the contents.**
  *
- * - Every field is `nullish` — present, null, or absent are all acceptable.
+ * - Every field is `nullish`: present, null, or absent are all acceptable.
  *   Not merely optional: `centsToDollars` returns `null` when an amount is
  *   missing, so a money field declared `.optional()` refuses the very row it
  *   was written for. That shipped for about an hour and the round-trip test
@@ -203,7 +203,7 @@ export const estimateRow = z
 
 /**
  * Tool name to the shape it returns. A tool absent from this table declares no
- * output schema — which is valid, and it still returns `structuredContent`,
+ * output schema, which is valid, and it still returns `structuredContent`,
  * because `out()` always sets it. Absence costs a consumer the contract, never
  * the data. The table is grown deliberately, one modelled family at a time,
  * because declaring a schema obliges every success path of that tool to satisfy

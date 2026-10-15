@@ -2,7 +2,7 @@
  * The self-contained HTML report shell and its vanilla-JS renderer.
  *
  * No framework: the interaction logic is plain DOM code, and the pure helpers
- * it relies on are the same ones the test suite pins — inlined here via
+ * it relies on are the same ones the test suite pins, inlined here via
  * `.toString()` so there is one source of truth. Everything (CSS, JS, data)
  * is inlined; the output makes no network request, matching the artifact CSP
  * and working offline.
@@ -233,7 +233,7 @@ function __hcpRenderReport(data){
     (cv.fields||[]).forEach(function(f){ var pct=coveragePct(f); var band=coverageBand(pct);
       var b=el("div","bar");
       b.appendChild(el("div","row","<span>"+escapeHtml(f.name)+"</span><span>"+
-        (pct===null?"—":pct+"%")+"</span>"));
+        (pct===null?"-":pct+"%")+"</span>"));
       var t=el("div","track"); var fill=el("div","fill "+band);
       fill.style.width=(pct===null?0:pct)+"%"; t.appendChild(fill); b.appendChild(t);
       if(f.note)b.appendChild(el("div","note",escapeHtml(f.note))); cov.appendChild(b); });

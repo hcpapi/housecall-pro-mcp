@@ -2,7 +2,7 @@
  * Pure helpers shared by two callers: the Node test suite imports them
  * directly, and the renderer inlines their source (via `.toString()`) into the
  * report so the browser runs the exact same code the tests pin. No imports, no
- * TS-only runtime constructs — the compiled output must be valid standalone
+ * TS-only runtime constructs, the compiled output must be valid standalone
  * browser JS.
  */
 
@@ -68,7 +68,7 @@ export function coverageBand(pct: number | null): string {
 
 /**
  * Which columns are worth offering as checkbox facets: a categorical column the
- * reader would filter by. Auto-detected so a skill needs no awareness — a column
+ * reader would filter by. Auto-detected so a skill needs no awareness, a column
  * qualifies when it is non-numeric, holds a small set of distinct values (2..8),
  * sits in a table big enough to filter (>= 10 rows), and is not opted out with
  * `filter: false`. High-cardinality columns (Customer, Description) fall out on
@@ -86,14 +86,14 @@ export function facetableColumns(
     for (const r of rows) {
       const v = String((Array.isArray(r) ? r[i] : "") ?? "").replace(/[`*]/g, "").trim();
       if (v) seen.add(v);
-      if (seen.size > 8) return; // too many distinct — not a facet
+      if (seen.size > 8) return; // too many distinct, not a facet
     }
     if (seen.size >= 2) out.push({ index: i, values: [...seen].sort() });
   });
   return out;
 }
 
-/** Strip micro-syntax markers and trim — the value a facet compares against. */
+/** Strip micro-syntax markers and trim, the value a facet compares against. */
 export function facetValue(s: unknown): string {
   return String(s ?? "")
     .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, "$1")
@@ -104,7 +104,7 @@ export function facetValue(s: unknown): string {
 /**
  * A table as CSV. Markers stripped (as the paste-back does), and any cell with a
  * comma, double-quote, or newline is wrapped in double-quotes with interior
- * quotes doubled — so the numbers open cleanly in a spreadsheet.
+ * quotes doubled, so the numbers open cleanly in a spreadsheet.
  */
 export function tableToCsv(columns: { label?: string }[], rows: string[][]): string {
   const cell = (s: unknown) => {
@@ -121,8 +121,8 @@ export function tableToCsv(columns: { label?: string }[], rows: string[][]): str
 }
 
 /**
- * The paste-back worklist for a section's selected rows. Plain and readable —
- * micro-syntax markers stripped — so it reads as a decision list in chat.
+ * The paste-back worklist for a section's selected rows. Plain and readable,
+ * micro-syntax markers stripped, so it reads as a decision list in chat.
  * `selected` is original row indices, which stay stable under sort and filter.
  */
 export function pastebackText(
@@ -137,5 +137,5 @@ export function pastebackText(
   const lines = selected
     .filter((i) => Array.isArray(rows[i]))
     .map((i) => "- " + rows[i].map(strip).join(" · "));
-  return `${title} — ${selected.length} selected\n${lines.join("\n")}`;
+  return `${title}: ${selected.length} selected\n${lines.join("\n")}`;
 }

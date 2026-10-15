@@ -231,7 +231,7 @@ const LIST_KEYS = [
 /**
  * How long to wait before a retry. Housecall Pro publishes no rate limit and no
  * X-RateLimit-* headers, so a Retry-After on a 429 is the only real backoff
- * signal it gives — honour it when present (seconds, or an HTTP date), capped so
+ * signal it gives, honour it when present (seconds, or an HTTP date), capped so
  * a hostile value can't stall the client, and fall back to a fixed ramp.
  */
 export function retryDelayMs(res: Response, attempt: number, baseMs: number): number {

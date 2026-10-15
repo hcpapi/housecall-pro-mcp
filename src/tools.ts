@@ -117,7 +117,7 @@ const EQUIPMENT_ON_A_JOB =
  *
  * Asked whether a sent estimate had been viewed, an agent reads this list, sees
  * work_status and a null approval_status, and reports that the customer has not
- * looked at it — or that Housecall Pro does not track opens at all. Both are
+ * looked at it, or that Housecall Pro does not track opens at all. Both are
  * false, and both are reached from a perfectly successful call, so no refusal
  * or error fires to correct them. The pointer has to ride the 200.
  */
@@ -4459,7 +4459,7 @@ export function registerTools(
 
   tool(
     "hcp_render_report",
-    "Render a findings report into one self-contained, offline, interactive HTML file — " +
+    "Render a findings report into one self-contained, offline, interactive HTML file: " +
       "sortable and filterable tables, severity-coded sections, collapsible worklists, selectable " +
       "rows that copy back to chat, light and dark theme, print. This is a presentation tool: it " +
       "makes no Housecall Pro call and takes findings you already have.\n\n" +
@@ -4500,7 +4500,7 @@ export function registerTools(
           // what is wrong; the example says what right looks like, which is what
           // stops a caller fixing one layer per round trip.
           return errOut(
-            "The report was not rendered — the contract has errors:\n- " +
+            "The report was not rendered: the contract has errors:\n- " +
               errors.join("\n- ") +
               "\n\nA minimal contract that renders:\n" +
               MINIMAL_REPORT_EXAMPLE,
@@ -4527,7 +4527,7 @@ export function registerTools(
               {
                 type: "text" as const,
                 text:
-                  `Report displayed: ${secN} section(s). It is open in the conversation now — ` +
+                  `Report displayed: ${secN} section(s). It is open in the conversation now. ` +
                   `do not repeat its contents, re-render it, or save it to a file unless the owner ` +
                   `asks. If nothing appeared for them, call this again with as_file: true to get the ` +
                   `report as a standalone HTML file instead.` +

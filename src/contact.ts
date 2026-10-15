@@ -93,7 +93,7 @@ function clip(clause: string): string {
 }
 
 /** Every readable suppression signal on this customer record, plus the clauses
- * that need a human. Pure over the record shape — no network. */
+ * that need a human. Pure over the record shape, no network. */
 export function analyzeContactability(c: any): ContactAnalysis {
   const signals: ContactSignal[] = [];
   const review: ContactReviewItem[] = [];
@@ -144,7 +144,7 @@ export function contactSignals(c: any): ContactSignal[] {
   return analyzeContactability(c).signals;
 }
 
-/** The signal the public API can never see — always returned so no union reads as complete. */
+/** The signal the public API can never see, always returned so no union reads as complete. */
 export const UNVERIFIABLE = [
-  "do_not_service_flag — Housecall Pro's Do Not Service checkbox is a dashboard setting this integration cannot read; confirm it in Housecall Pro",
+  "do_not_service_flag: Housecall Pro's Do Not Service checkbox is a dashboard setting this integration cannot read; confirm it in Housecall Pro",
 ];

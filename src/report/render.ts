@@ -1,10 +1,10 @@
 /**
  * Render a report contract to a single self-contained HTML string.
  *
- * Validate first (a fatal error means no HTML — a half-rendered report is worse
+ * Validate first (a fatal error means no HTML, a half-rendered report is worse
  * than none), then inject the title and the data into the template. Both
- * injections use a replacer *function* so a `$` in the data — money is full of
- * them — is never read as a `String.replace` special pattern, and the JSON has
+ * injections use a replacer *function* so a `$` in the data, money is full of
+ * them, is never read as a `String.replace` special pattern, and the JSON has
  * its `<` escaped so it cannot break out of the data <script> block while
  * staying valid JSON.
  */

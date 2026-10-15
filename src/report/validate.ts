@@ -6,7 +6,7 @@
  * `warnings` are advisory (the report renders, just thinner). The tool refuses
  * to render on any error and passes warnings through for the caller to see.
  *
- * The input is unknown-shaped on purpose — this runs on whatever a skill
+ * The input is unknown-shaped on purpose, this runs on whatever a skill
  * hands the tool, so every access is defensive.
  */
 import {
@@ -73,10 +73,10 @@ export function validateReport(input: unknown): ValidationResult {
     errors.push("'sections' must be a list");
   }
 
-  // Recommended keys — present in a full report, not required.
+  // Recommended keys, present in a full report, not required.
   for (const k of ["headline", "coverage", "stats", "order", "meta"]) {
     if (!(k in data)) {
-      warnings.push(`recommended key '${k}' missing — report will render without it`);
+      warnings.push(`recommended key '${k}' missing: report will render without it`);
     }
   }
 
@@ -94,7 +94,7 @@ export function validateReport(input: unknown): ValidationResult {
   if ("coverage" in data && data.coverage != null) {
     const cov = data.coverage;
     if (!isObject(cov) || !("fields" in cov)) {
-      warnings.push("coverage.fields missing — coverage card will be empty");
+      warnings.push("coverage.fields missing: coverage card will be empty");
     }
     const fields = isObject(cov) && Array.isArray(cov.fields) ? cov.fields : [];
     fields.forEach((f, i) => {

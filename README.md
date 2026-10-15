@@ -70,7 +70,7 @@ an error.
 | Removing a tag from a job answers with an empty success whether or not the tag was there. | Reports the request as accepted rather than claiming a removal it cannot confirm. |
 | An archived job refuses to describe its appointments. | Flags the job as archived and returns an empty list, so a sweep never stops part way. |
 | The invoice document is a very long HTML page, not a PDF. | Returns the opening of the page and says how much of it that was. |
-| Attachments have no route of their own — `GET` on a job's attachments path serves an HTML 404 — but `expand[]=attachments` returns them with a signed download link. | Asks with `expand` and hands back the files. The link is minted per request, so it is fetched when given and never stored. |
+| Attachments have no route of their own, `GET` on a job's attachments path serves an HTML 404, but `expand[]=attachments` returns them with a signed download link. | Asks with `expand` and hands back the files. The link is minted per request, so it is fetched when given and never stored. |
 | Some routes answer only on `PUT`, and a `POST` to the same path returns an HTML 404 page, which reads as "no such route" rather than as the wrong method. | Uses the method each route actually takes, so dispatching a crew and bulk line-item updates work instead of looking absent. |
 
 **Never trust a 2xx on a Housecall Pro write.** Read the record back. Several
@@ -79,7 +79,7 @@ routes answer 200 without changing anything, which is why the rows above exist.
 ## The `hcp` command line
 
 The same package installs `hcp`, which reaches the same Housecall Pro surface
-from a terminal. It is the same code — every command is one of the tools below,
+from a terminal. It is the same code: every command is one of the tools below,
 with the same conversions, the same filters and the same refusals.
 
 It exists because an MCP server only runs while an assistant is in the room.
@@ -133,13 +133,13 @@ integration built from the docs alone ships broken code paths for each one.
 | `DELETE /customers/{id}` | Absent. There is no public customer delete. |
 | `PUT` or `DELETE /customers/{id}/addresses/{adr}` | Absent. Addresses are append-only. |
 | `PUT` or `DELETE /estimates/{id}` and `/estimates/{id}/options/{opt}` | Absent. |
-| `PUT` or `DELETE /leads/{id}` | Absent as writes: a lead cannot be updated or deleted. Reading works — `GET /leads`, `GET /leads/{id}` and `GET /leads/{id}/line_items` are all live. |
+| `PUT` or `DELETE /leads/{id}` | Absent as writes: a lead cannot be updated or deleted. Reading works: `GET /leads`, `GET /leads/{id}` and `GET /leads/{id}/line_items` are all live. |
 | `DELETE /tags/{id}` | Absent. A tag can never be deleted through the API. |
 | `DELETE /jobs/{id}/tags` | Absent. |
 | `PUT /jobs/{id}/lock` | The verb is absent, not the route: `POST /jobs/{id}/lock` locks one job. The bulk `POST /jobs/lock` also exists and keys on `starting_at` rather than a list of job ids. |
 | `POST /api/price_book/services` | Absent. Materials and categories create normally. |
 | `GET /webhooks/subscription` | Absent. |
-| `GET /employees/{id}` | Absent. There is no employee detail route — an id that `GET /employees` just returned serves an HTML 404. Read the row from the listing. |
+| `GET /employees/{id}` | Absent. There is no employee detail route: an id that `GET /employees` just returned serves an HTML 404. Read the row from the listing. |
 
 ## What you can ask
 
@@ -234,7 +234,7 @@ see [Choosing which tools to register](#choosing-which-tools-to-register).
 | `hcp_list_employees` | Employees and roles |
 | `hcp_list_tags` · `hcp_list_job_types` · `hcp_list_lead_sources` | Account lookups |
 | `hcp_revenue_summary` | Invoiced revenue by month or line item |
-| `hcp_render_report` | Turn findings into one interactive report — sortable tables, selectable rows, print. Opens in the conversation on clients that support it, and comes back as a self-contained HTML file everywhere else. Makes no API call |
+| `hcp_render_report` | Turn findings into one interactive report: sortable tables, selectable rows, print. Opens in the conversation on clients that support it, and comes back as a self-contained HTML file everywhere else. Makes no API call |
 | `hcp_export_csv` | CSV export of customers, jobs, invoices or estimates |
 | `hcp_api_notes` | What the API actually does for a topic, where that differs from its documentation. Answers from a compiled table, so it makes no request |
 
@@ -255,7 +255,7 @@ Needs a full-access key.
 | `hcp_upload_estimate_option_attachment` | The same for an estimate option. Cannot be read back, so keep the returned id |
 | `hcp_schedule_estimate_option` | Book a visit for an estimate option and dispatch to it. `notify` defaults to false; Housecall Pro may still remind the customer nearer the date |
 | `hcp_add_job_link` · `hcp_add_estimate_option_link` | Attach a titled link. Needs an application on the account, or answers "Application not found" |
-| `hcp_lock_job` · `hcp_lock_jobs_by_date` | Freeze a job, or everything from a date. **No unlock exists on this API** — a dashboard action, so ask first |
+| `hcp_lock_job` · `hcp_lock_jobs_by_date` | Freeze a job, or everything from a date. **No unlock exists on this API**, a dashboard action, so ask first |
 | `hcp_set_application_enabled` | Enable or disable the account's API application. Affects every integration on the account |
 | `hcp_create_webhook_subscription` · `hcp_delete_webhook_subscription` | Subscribe or unsubscribe a delivery URL. Partner-gated, and a subscription is dropped after one 5xx from your endpoint |
 | `hcp_update_job_input_materials` | Replace what a job records as used on site. A whole-list replace, so read it first |
@@ -419,15 +419,15 @@ Every tool returns its result as structured data as well as text, so a client
 that wants the records does not have to parse them out of prose. The listings
 also declare an output schema, which means the field names, their types and the
 nesting are readable from `tools/list` before anything is called. Tools that
-hand back a Housecall Pro record unchanged declare no schema, deliberately —
+hand back a Housecall Pro record unchanged declare no schema, deliberately:
 describing fields we do not control would go stale without anyone noticing.
 
 No tool here sends an email, a text or an estimate on your behalf. Drafting an
 estimate leaves it sitting as a draft, and sending it stays a deliberate action
 you take inside Housecall Pro.
 
-Reports open where you are reading. On a client that supports MCP Apps —
-Claude and Claude Desktop today, not Claude Code — `hcp_render_report` renders
+Reports open where you are reading. On a client that supports MCP Apps
+(Claude and Claude Desktop today, not Claude Code), `hcp_render_report` renders
 in the conversation itself: the same sortable, filterable report, with its rows
 still selectable back into chat. Nothing is downloaded and no file is written.
 Everywhere else the tool returns the report as one self-contained HTML file
@@ -571,7 +571,7 @@ you when it is ready.
 ## Issues and pull requests
 
 Bug reports and feature requests are welcome in the issue tracker, and the more
-of them the better — say what you asked your assistant to do and what came back.
+of them the better. Say what you asked your assistant to do and what came back.
 
 Pull requests are closed automatically. Releases are validated against an
 internal test suite that a pull request cannot run, so there is no honest way to

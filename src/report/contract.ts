@@ -1,5 +1,5 @@
 /**
- * The report contract — the one JSON shape every skill fills to produce a
+ * The report contract, the one JSON shape every skill fills to produce a
  * report, ported from the report-renderer prototype's REPORT-CONTRACT.md.
  *
  * The contract is renderer-agnostic on purpose: nothing here mentions HTML.
@@ -20,7 +20,7 @@ export const STAT_TONES = [
 ] as const;
 export type StatTone = (typeof STAT_TONES)[number];
 
-/** A section's severity — also drives its pill and left border. */
+/** A section's severity, also drives its pill and left border. */
 export const SEVERITIES = [
   "confident",
   "ok",

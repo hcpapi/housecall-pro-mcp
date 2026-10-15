@@ -7,20 +7,16 @@ this file is the summary per version.
 
 **The report opens in the conversation, and there is now a command line.**
 
-Reports have always been one self-contained interactive document: everything
-inlined, no network request, works offline. Getting one in front of you was the
-awkward part. The assistant had to write a file and hand over a path, or paste
-the HTML back as an artifact, a manual step in the middle of an answer. The
-report is now registered as an MCP App, so a client that supports them draws it
-in the conversation, still sortable, still filterable, rows still selectable
-back into the chat. Nothing depends on the client having it. A host that does
-not declare the extension gets exactly what it got before, and `as_file` forces
-the file version back on a host that claims support and then draws nothing.
+Reports have always been one self-contained HTML document. Getting one in front
+of you meant the assistant wrote a file and handed over a path. The report is
+now an MCP App, so a client that supports them draws it in the conversation,
+sortable and filterable, with rows selectable back into the chat. A host
+without the extension gets exactly what it got before, and `as_file` forces the
+file version on a host that claims support and then draws nothing.
 
-**`hcp`, a command line over the same surface.** The package now installs a
-second binary. Every command is one of the tools this server already has,
-reached through the same handlers, so a filter, a conversion or a refusal
-behaves the same whichever way you come at it.
+**`hcp`, a command line over the same surface.** The package installs a second
+binary. Every command is one of the server's own tools through the same
+handlers, so filters, conversions and refusals behave the same either way.
 
 ```bash
 hcp list jobs --work-status completed
@@ -28,98 +24,39 @@ hcp list invoices --csv > aging.csv
 hcp create customer --first-name Alex --last-name Rivera --dry-run
 ```
 
-It exists because an MCP server only runs while an assistant is in the room. A
-scheduled task that writes an aging report every Monday morning is not something
-an MCP client can do, and it is a large part of what an office actually wants.
-Tables by default, `--json` and `--csv` when you want the records. Data goes to
-stdout and commentary to stderr, so a redirect gets the data and nothing else.
+An MCP server only runs while an assistant is in the room. A scheduled Monday
+aging report is not something an MCP client can do. Tables by default, `--json`
+and `--csv` for the records. Data goes to stdout and commentary to stderr.
 `--dry-run` prints what a write would send and sends nothing. `--read-only`
-refuses anything that could change the account and names the switch that stopped
-it. Windows, macOS and Linux.
+refuses anything that could change the account. Commands derive from the tool
+names, in both `hcp list jobs` and `hcp jobs list` order. Windows, macOS and
+Linux.
 
-Commands derive from the tool names rather than being listed by hand, in both
-`hcp list jobs` and `hcp jobs list` order, so nothing can be reachable from one
-front end and missing from the other.
+**Results come back as structured data.** Every tool returns
+`structuredContent` beside its text, which is unchanged. Nine tools declare an
+output schema, so a client reading `tools/list` sees field names and types
+without calling anything. Every field is nullish and unknown keys pass through,
+so a field Housecall Pro adds next month cannot take a tool down. Tools that
+return the upstream record unchanged declare nothing, because a schema that
+describes fields a tool does not send lies to whoever reads it.
 
-Two things in the report app turned up by running it rather than reading it. The
-app measured its own size synchronously and reported a width of zero, because an
-iframe handed a fresh document has no width for a frame or two. At zero width
-the height comes back several thousand pixels, so a host sizing itself on that
-draws an unusable report. It now measures after layout. It also no longer
-measures only inside `requestAnimationFrame`: a document in a hidden or
-backgrounded tab is never composited, its frame callbacks never run, and a
-report rendered off screen would have gone on never telling the host anything.
-
-Tool registration moves from the deprecated `server.tool` to `registerTool`,
-the only entry point that carries the metadata a tool needs to name the app
-that renders it.
-
-**Results come back as structured data, not only as text.** Every tool now
-returns `structuredContent` alongside the text block it always returned, so a
-client that wants the records no longer has to parse prose to reach them. The
-text itself is unchanged.
-
-Nine of those tools also declare an output schema, so a client reading
-`tools/list` can see the field names, their types and the nesting without
-calling anything: the three paginated listings, the three that answer in their
-own envelope, and the three that return a bare array. Every field is nullish and
-every object passes unknown keys through, so a field Housecall Pro adds next
-month cannot take a tool down.
-
-The tools that hand back the upstream record unchanged (`hcp_get_job`,
-`hcp_get_customer`, `hcp_get_customer_address`, `hcp_get_invoice`) deliberately
-declare nothing. Modelling those means owning Housecall Pro's own schema, and a
-schema describing fields a tool does not send validates perfectly while telling
-whoever reads it something untrue.
-
-**A registry listing no longer reads as the whole account.** Asked how many
-callbacks the business had last month, an assistant would list the job types,
-tags and lead sources, find nothing called a callback, and answer that Housecall
-Pro does not track them. It does. Callback is a first-class Job Field that sits
-beside Job Type, drives the dashboard's callback-rate reporting, and simply is
-not on this API in any spelling. `hcp_list_job_types`, `hcp_list_tags` and
-`hcp_list_lead_sources` now say so on a successful read: what is configured here
-is not everything Housecall Pro tracks, and not finding a category in the list is
-not evidence the business does not track it.
-
-The guidance was already in `hcp_api_notes`. The model was not going to look, so
-the pointer has to ride the response it actually receives.
-
-**A note that answers beats a note that defers.** `JOB_FIELDS_NOT_HERE` told a
-client that Callback and Business Unit are real fields absent from this API, then
-sent it to `hcp_api_notes` for the rest. Measured, that deferral loses. Asked
-which business unit a job was booked under, the model read the caveat, did not
-follow the pointer, and could not say where the field actually lives. The note
-now names it inline: the job's Job Fields section in the dashboard, and the
-dashboard's own job export, which carries a Callback column.
-
-The difference is large, and it is not a matter of length. With the caveat
-deferring, the case scored 0.67 across three runs and never consulted the notes.
-With it answering, 1.00, on a longer note.
+**A registry listing is not the whole account.** Asked how many callbacks the
+business had, an assistant would list job types, tags and lead sources, find no
+callback, and say Housecall Pro does not track them. It does. Callback is a Job
+Field that is not on this API in any spelling, and the three listings now say
+so on a successful read. The job-fields note also names where Callback and
+Business Unit live (the dashboard's Job Fields section and its job export)
+instead of pointing at `hcp_api_notes`. Measured, the inline answer scored 1.00
+where the pointer scored 0.67.
 
 **Who is on an estimate, and when it was answered.** Housecall Pro added two
-fields to the estimate record this month, and both now ride every estimate
-row. `employees` is the assigned technicians as id and name, the same shape a
-job row has carried all along; an estimate that has not been assigned and
-scheduled in the app has an empty list. Each option now has
-`approval_status_updated_at`, the moment its `approval_status` last changed,
-null until the customer or the office answered. "Approved five days ago and
-still not scheduled" was computed from the option's `updated_at` before, a
-clock that moves for other reasons too. Now it reads from the field that means
-it. `lead_source` rides along as well, as it has on jobs since 1.17.0.
-
-**`hcp_get_estimate` reads one estimate in full.** Every option, the assigned
-employees, the customer, the address, and the schedule with the same
-account-zone rendering a job record gets. Line items stay a separate read per
-option, as before.
-
-**The estimates CSV no longer says `[object Object]`.** The options column was
-a list of records joined as strings, which is what JavaScript prints for one.
-Lists of records now render field by field (`id=est_... name=Option 1
-approval_status=approved total_dollars=1500`), in every export, which also puts
-a job's employees into the jobs export readably.
-
-Requested in hcpapi/housecall-pro-mcp#2.
+estimate fields this month and both ride every row: `employees` as id and name,
+the same shape as on jobs, and per option `approval_status_updated_at`, null
+until answered. `lead_source` rides along too. The new `hcp_get_estimate` reads
+one estimate in full. Line items stay a separate read per option. The estimates
+CSV no longer says `[object Object]`: lists of records render field by field in
+every export, including a job's employees. Requested in
+hcpapi/housecall-pro-mcp#2.
 
 ## 1.18.0 — 2026-08-16
 
